@@ -13,7 +13,6 @@ import (
 
 // logOptions holds the command options for the logs command
 type logOptions struct {
-	namespace string
 	container string
 	follow    bool
 	level     string
@@ -46,7 +45,6 @@ func init() {
 }
 
 func addLogFlags(cmd *cobra.Command) {
-	cmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace (defaults to current context's namespace)")
 	cmd.Flags().StringP("container", "c", "", "Specific container name within the pod")
 	cmd.Flags().BoolP("follow", "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP("level", "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
@@ -55,20 +53,13 @@ func addLogFlags(cmd *cobra.Command) {
 
 // completePodNames provides dynamic completion for pod names
 func completePodNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	clientset, _, err := kubernetes.GetKubernetesClient()
+	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	namespace, _ := cmd.Flags().GetString("namespace")
-	if namespace == "" {
-		namespace = "default"
-	}
-
-	// Add field selector to filter pods by name prefix for faster results
 	pods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s*", toComplete),
-		Limit:         50, // Limit results for faster response
+		Limit: 100,
 	})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
@@ -90,27 +81,20 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	clientset, _, err := kubernetes.GetKubernetesClient()
+	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	namespace, _ := cmd.Flags().GetString("namespace")
-	if namespace == "" {
-		namespace = "default"
-	}
-
 	podName := args[0]
-	containers, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", podName),
-	})
+	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 
 	var names []string
-	if len(containers.Items) > 0 {
-		for _, container := range containers.Items[0].Spec.Containers {
+	for _, container := range pod.Spec.Containers {
+		if strings.HasPrefix(container.Name, toComplete) {
 			names = append(names, container.Name)
 		}
 	}
@@ -119,11 +103,6 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 }
 
 func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
-	namespace, err := cmd.Flags().GetString("namespace")
-	if err != nil {
-		return nil, fmt.Errorf("error getting namespace flag: %v", err)
-	}
-
 	container, err := cmd.Flags().GetString("container")
 	if err != nil {
 		return nil, fmt.Errorf("error getting container flag: %v", err)
@@ -145,7 +124,6 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 	}
 
 	return &logOptions{
-		namespace: namespace,
 		container: container,
 		follow:    follow,
 		level:     level,
@@ -160,20 +138,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	clientset, contextNamespace, err := kubernetes.GetKubernetesClient()
+	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
 		return fmt.Errorf("error getting kubernetes client: %v", err)
-	}
-
-	// Use context namespace if no namespace is specified
-	if options.namespace == "" {
-		options.namespace = contextNamespace
 	}
 
 	// Create log fetcher with the new interface
 	logFetcher := kubernetes.NewLogFetcher(
 		clientset,
-		options.namespace,
+		namespace,
 		options.podName,
 		options.follow,
 		options.previous,

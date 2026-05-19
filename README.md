@@ -70,6 +70,8 @@ logx logs my-pod -n my-namespace
 Options:
 
 - `-n, --namespace`: Kubernetes namespace, defaults to the current context namespace
+- `--context`: Kubernetes context, defaults to the current kubeconfig context
+- `--kubeconfig`: Path to a kubeconfig file, defaults to `KUBECONFIG` or `~/.kube/config`
 - `-c, --container`: Container name for multi-container pods
 - `-f, --follow`: Follow log output
 - `-l, --level`: Filter logs by level: `DEBUG`, `INFO`, `WARN`, `ERROR`

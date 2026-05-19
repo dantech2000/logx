@@ -68,7 +68,7 @@ func FormatContainerInfo(info ContainerInfo) string {
 }
 
 // ListContainers returns detailed information about containers in a pod
-func ListContainers(clientset *kubernetes.Clientset, namespace, podName string) ([]ContainerInfo, error) {
+func ListContainers(clientset kubernetes.Interface, namespace, podName string) ([]ContainerInfo, error) {
 	ctx := context.Background()
 	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {

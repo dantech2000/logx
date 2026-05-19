@@ -43,6 +43,7 @@ func Execute() {
 }
 
 func init() {
+	addKubeFlags(rootCmd)
 	addLogFlags(rootCmd)
 	rootCmd.ValidArgsFunction = completePodNames
 	_ = rootCmd.RegisterFlagCompletionFunc("container", completeContainerNames)

@@ -8,13 +8,36 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// GetKubernetesClient creates a new Kubernetes client using the default kubeconfig.
-// It returns the clientset, the current namespace, and any error encountered.
-// The current namespace is determined from the kubeconfig context.
-func GetKubernetesClient() (*kubernetes.Clientset, string, error) {
+const DefaultNamespace = "default"
+
+// ClientOptions describes kubeconfig overrides used to create a Kubernetes client.
+type ClientOptions struct {
+	Context    string
+	Namespace  string
+	Kubeconfig string
+}
+
+// NewClientConfig creates a deferred kubeconfig loader using kubectl-compatible overrides.
+func NewClientConfig(opts ClientOptions) clientcmd.ClientConfig {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	configOverrides := &clientcmd.ConfigOverrides{}
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+	if opts.Kubeconfig != "" {
+		loadingRules.ExplicitPath = opts.Kubeconfig
+	}
+
+	configOverrides := &clientcmd.ConfigOverrides{
+		CurrentContext: opts.Context,
+	}
+	if opts.Namespace != "" {
+		configOverrides.Context.Namespace = opts.Namespace
+	}
+
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+}
+
+// GetKubernetesClient creates a new Kubernetes client using kubeconfig and explicit overrides.
+// It returns the clientset, the resolved namespace, and any error encountered.
+func GetKubernetesClient(opts ClientOptions) (*kubernetes.Clientset, string, error) {
+	kubeConfig := NewClientConfig(opts)
 
 	config, err := kubeConfig.ClientConfig()
 	if err != nil {
@@ -24,6 +47,9 @@ func GetKubernetesClient() (*kubernetes.Clientset, string, error) {
 	namespace, _, err := kubeConfig.Namespace()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get namespace from config: %w", err)
+	}
+	if namespace == "" {
+		namespace = DefaultNamespace
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
