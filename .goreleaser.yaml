@@ -3,8 +3,11 @@ version: 2
 before:
   hooks:
     - go mod tidy
+
 builds:
-  - env:
+  - id: logx
+    binary: logx
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -14,12 +17,32 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -X github.com/dantech2000/kubelog/lib.commitHash={{.Commit}}
-      - -X github.com/dantech2000/kubelog/lib.buildDate={{.Date}}
+      - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
+      - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
+    main: ./main.go
+  - id: kubectl-logx
+    binary: kubectl-logx
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
+      - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
     main: ./main.go
 
 archives:
-  - format: tar.gz
+  - id: logx-archive
+    ids:
+      - logx
+      - kubectl-logx
+    formats:
+      - tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -27,21 +50,23 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
-brews:
-  - name: kubelog
+homebrew_casks:
+  - name: logx
+    ids:
+      - logx-archive
+    binaries:
+      - logx
+      - kubectl-logx
     repository:
       owner: dantech2000
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
-    homepage: 'https://github.com/dantech2000/kubelog'
-    description: 'CLI tool to fetch and enhance Kubernetes pod logs'
+    homepage: 'https://github.com/dantech2000/logx'
+    description: 'Enhanced Kubernetes pod log viewer'
     license: 'MIT'
-    test: |
-      system "#{bin}/kubelog version"
-    install: |
-      bin.install "kubelog"
 
 changelog:
   sort: asc

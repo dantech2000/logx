@@ -17,7 +17,7 @@ func TestLogFetcher_GetLogs(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	clientset.Fake.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		if action.GetSubresource() == "log" {
-			return true, &corev1.Pod{}, nil
+			return true, &runtime.Unknown{Raw: []byte("fake logs")}, nil
 		}
 		return false, nil, nil
 	})

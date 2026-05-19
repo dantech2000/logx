@@ -18,14 +18,14 @@
 
 ```bash
 brew tap dantech2000/tap
-brew install logx
+brew install --cask logx
 ```
 
 ### Manual
 
 Prerequisites:
 
-- Go 1.22 or later
+- Go 1.26 or later
 - Access to a Kubernetes cluster
 - `kubectl` configured with the appropriate context
 - `just` command runner, optional
