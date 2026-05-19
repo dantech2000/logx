@@ -13,20 +13,20 @@ var completionCmd = &cobra.Command{
 	Long: `To load completions:
 
 Bash:
-  $ source <(kubelog completion bash)
+  $ source <(logx completion bash)
 
 Zsh:
   # If shell completion is not already enabled in your environment:
   $ echo "autoload -U compinit; compinit" >> ~/.zshrc
   
   # Then generate and source completion:
-  $ kubelog completion zsh > "${fpath[1]}/_kubelog"
+  $ logx completion zsh > "${fpath[1]}/_logx"
 
 Fish:
-  $ kubelog completion fish | source
+  $ logx completion fish | source
 
 PowerShell:
-  PS> kubelog completion powershell | Out-String | Invoke-Expression`,
+  PS> logx completion powershell | Out-String | Invoke-Expression`,
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 	Args:                  cobra.ExactValidArgs(1),
@@ -42,4 +42,8 @@ PowerShell:
 			cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
 		}
 	},
+}
+
+func init() {
+	rootCmd.AddCommand(completionCmd)
 }

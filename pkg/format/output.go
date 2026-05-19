@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dantech2000/kubelog/pkg/kubernetes"
+	"github.com/dantech2000/logx/pkg/kubernetes"
 	"gopkg.in/yaml.v2"
 )
 

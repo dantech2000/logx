@@ -1,199 +1,140 @@
-# Kubelog
+# logx
 
-Kubelog is a CLI tool to fetch and enhance Kubernetes pod logs. It simplifies the retrieval and parsing of Kubernetes pod logs, providing enhanced formatting and filtering options for efficient troubleshooting.
+`logx` is an enhanced Kubernetes pod log viewer. It fetches pod logs, parses common structured and plain-text formats, highlights useful fields, and works as both a standalone CLI and a `kubectl` plugin.
 
 ## Features
 
-- 🎯 **Smart Log Parsing**
-  - Automatic detection of JSON and plain text log formats
-  - Intelligent timestamp parsing across multiple formats
-  - Log level detection (DEBUG, INFO, WARN, ERROR, FATAL)
-  - Structured field parsing for JSON logs
-
-- 🎨 **Beautiful Output Formatting**
-  - Color-coded log levels and timestamps
-  - Consistent timestamp formatting
-  - Highlighted error and warning messages
-  - Clean key-value formatting for JSON fields
-  - Logger type identification (e.g., logrus, zap)
-
-- 🚀 **Kubernetes Integration**
-  - Easy container selection with interactive prompts
-  - Support for multi-container pods
-  - Previous container logs with `-p` flag
-  - Real-time log following with `-f` flag
-  - Container status indicators
-
-- ⚡ **Performance**
-  - Efficient log streaming
-  - Smart container name completion
-  - Optimized log parsing
+- Smart log parsing for JSON and plain-text logs
+- Timestamp and log-level detection
+- Colorized, readable output
+- Multi-container pod support with interactive selection
+- Previous container logs with `-p`
+- Live log following with `-f`
+- Container listing with JSON, YAML, and POSIX output
 
 ## Installation
 
-### Using Homebrew
+### Homebrew
 
 ```bash
 brew tap dantech2000/tap
-brew install kubelog
+brew install logx
 ```
 
-### Manual Installation
+### Manual
 
-### Prerequisites
+Prerequisites:
 
-- Go 1.16 or later
+- Go 1.22 or later
 - Access to a Kubernetes cluster
-- kubectl configured with the appropriate context
-- [just](https://github.com/casey/just) command runner (optional, but recommended)
+- `kubectl` configured with the appropriate context
+- `just` command runner, optional
 
-### Steps
+Build the binaries:
 
-1. Clone the repository:
+```bash
+git clone https://github.com/dantech2000/logx.git
+cd logx
+just build
+```
 
-    ```bash
-    git clone https://github.com/dantech2000/kubelog.git
-    ```
+Or with Go directly:
 
-2. Navigate to the project directory:
+```bash
+go build -o bin/logx main.go
+go build -o bin/kubectl-logx main.go
+```
 
-    ```bash
-    cd kubelog
-    ```
+Move either binary into a directory on your `PATH`. Kubernetes discovers the plugin form from the `kubectl-logx` executable name:
 
-3. Build the binary:
-
-    ```bash
-    # Using just (recommended, includes version information)
-    just build-version
-
-    # Or using Go directly
-    go build -o bin/kubelog main.go
-    ```
-
-4. (Optional) Move the binary to a directory in your PATH:
-    ```bash
-    sudo mv bin/kubelog /usr/local/bin/
-    ```
+```bash
+logx --help
+kubectl logx --help
+```
 
 ## Usage
 
-### Fetching Logs
-
-To fetch logs from a pod:
+Fetch logs from a pod:
 
 ```bash
-kubelog logs [pod-name] -n [namespace]
+logx my-pod -n my-namespace
+kubectl logx my-pod -n my-namespace
+```
+
+The explicit subcommand form is also supported:
+
+```bash
+logx logs my-pod -n my-namespace
 ```
 
 Options:
 
-- `-n, --namespace`: Specify the Kubernetes namespace (default is "default")
-- `-c, --container`: Specify the container name (if pod has multiple containers)
-- `-f, --follow`: Follow the log output (similar to `tail -f`)
-- `-l, --level`: Filter logs by level (DEBUG, INFO, WARN, ERROR)
+- `-n, --namespace`: Kubernetes namespace, defaults to the current context namespace
+- `-c, --container`: Container name for multi-container pods
+- `-f, --follow`: Follow log output
+- `-l, --level`: Filter logs by level: `DEBUG`, `INFO`, `WARN`, `ERROR`
+- `-p, --previous`: Fetch logs from the previous terminated container instance
 
 Example:
 
 ```bash
-kubelog logs my-pod -n my-namespace -c my-container -f -l INFO
+logx my-pod -n my-namespace -c my-container -f -l INFO
 ```
 
-### Listing Containers
-
-To list containers in a pod:
+List containers in a pod:
 
 ```bash
-kubelog containers [pod-name] -n [namespace]
+logx containers my-pod -n my-namespace
 ```
 
-Options:
-
-- `-n, --namespace`: Specify the Kubernetes namespace (default is "default")
-
-Example:
+Output formats:
 
 ```bash
-kubelog containers my-pod -n my-namespace
+logx containers my-pod -o json
+logx containers my-pod -o yaml
+logx containers my-pod -o posix
 ```
 
-### Version Information
-
-To display version information:
+Version information:
 
 ```bash
-kubelog version
+logx version
+logx version --short
+logx version --output json
+logx version --output yaml
 ```
 
-Options:
-
-- `-s, --short`: Display only the version number
-- `-o, --output`: Output format (json or yaml)
-
-Examples:
+Shell completion:
 
 ```bash
-# Display full version information
-kubelog version
-
-# Display only version number
-kubelog version --short
-
-# Get version info in JSON format
-kubelog version --output json
-
-# Get version info in YAML format
-kubelog version --output yaml
+logx completion zsh > "${fpath[1]}/_logx"
 ```
 
 ## Development
 
-### Available Make Commands
-
 ```bash
 just --list
+just build
+just test
+just fmt
 ```
 
-Common commands:
+`just build` creates:
 
-- `just build-version`: Build with version information
-- `just test`: Run tests
-- `just lint`: Run linter
-- `just fmt`: Format code
-- `just clean`: Clean build artifacts
-- `just deps`: Install dependencies
-- `just cross-compile`: Build for multiple platforms
+- `bin/logx`
+- `bin/kubectl-logx`
 
-### Creating a Release
+## Release
 
-1. Update the version in `lib/version.go`
+Create and push a version tag:
 
-2. Commit your changes:
-    ```bash
-    git add .
-    git commit -m "Bump version to X.Y.Z"
-    ```
+```bash
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+```
 
-3. Create and push a new tag:
-    ```bash
-    git tag -a vX.Y.Z -m "Release vX.Y.Z"
-    git push origin vX.Y.Z
-    ```
-
-This will trigger the GitHub Actions workflow which will:
-- Build the project
-- Create a GitHub release
-- Upload the binaries
-- Update the Homebrew tap
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+The release pipeline should publish both the standalone `logx` binary and the `kubectl-logx` plugin binary.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dantech2000/kubelog/pkg/kubernetes"
+	"github.com/dantech2000/logx/pkg/kubernetes"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -22,9 +22,9 @@ type logOptions struct {
 }
 
 var logsCmd = &cobra.Command{
-	Use:   "logs [container_id]",
-	Short: "Display logs for a specific container",
-	Long: `Display logs for a specific container. You can filter logs by level using the --level flag.
+	Use:   "logs [pod-name]",
+	Short: "Display logs for a Kubernetes pod",
+	Long: `Display logs for a Kubernetes pod. You can filter logs by level using the --level flag.
 Supported levels are DEBUG, INFO, WARN, and ERROR.`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -37,16 +37,20 @@ Supported levels are DEBUG, INFO, WARN, and ERROR.`,
 
 func init() {
 	rootCmd.AddCommand(logsCmd)
-	logsCmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace (defaults to current context's namespace)")
-	logsCmd.Flags().StringP("container", "c", "", "Specific container name within the pod")
-	logsCmd.Flags().BoolP("follow", "f", false, "Follow the log output in real-time")
-	logsCmd.Flags().StringP("level", "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
-	logsCmd.Flags().BoolP("previous", "p", false, "Get previous terminated container logs")
+	addLogFlags(logsCmd)
 
 	// Add completion for pod names
 	logsCmd.ValidArgsFunction = completePodNames
 	// Add completion for container names
 	_ = logsCmd.RegisterFlagCompletionFunc("container", completeContainerNames)
+}
+
+func addLogFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("namespace", "n", "", "Kubernetes namespace (defaults to current context's namespace)")
+	cmd.Flags().StringP("container", "c", "", "Specific container name within the pod")
+	cmd.Flags().BoolP("follow", "f", false, "Follow the log output in real-time")
+	cmd.Flags().StringP("level", "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
+	cmd.Flags().BoolP("previous", "p", false, "Get previous terminated container logs")
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -175,6 +179,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		options.previous,
 		os.Stdout,
 	)
+	logFetcher.ContainerName = options.container
 
 	// Get logs using the new method
 	err = logFetcher.GetLogs()

@@ -6,7 +6,8 @@ default:
 
 # Build the CLI tool
 build:
-    go build -o bin/kubelog main.go
+    go build -o bin/logx main.go
+    go build -o bin/kubectl-logx main.go
 
 # Run tests
 test:
@@ -18,7 +19,9 @@ build-version:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    go build -ldflags "-X github.com/dantech2000/kubelog/lib.commitHash=${COMMIT_HASH} -X github.com/dantech2000/kubelog/lib.buildDate=${BUILD_DATE}" -o bin/kubelog main.go
+    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
+    go build -ldflags "${LDFLAGS}" -o bin/logx main.go
+    go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx main.go
 
 # Cross-compile for multiple platforms
 cross-compile:
@@ -26,11 +29,14 @@ cross-compile:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/kubelog/lib.commitHash=${COMMIT_HASH} -X github.com/dantech2000/kubelog/lib.buildDate=${BUILD_DATE}"
+    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
     
-    GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubelog-linux-amd64 main.go
-    GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubelog-darwin-amd64 main.go
-    GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubelog-windows-amd64.exe main.go
+    GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/logx-linux-amd64 main.go
+    GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx-linux-amd64 main.go
+    GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/logx-darwin-amd64 main.go
+    GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx-darwin-amd64 main.go
+    GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/logx-windows-amd64.exe main.go
+    GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx-windows-amd64.exe main.go
 
 # Run linter
 lint:
@@ -102,4 +108,4 @@ release-goreleaser:
 
 # Build and run in one step
 build-and-run *ARGS: build
-    ./bin/kubelog {{ ARGS }}
+    ./bin/logx {{ ARGS }}

@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/dantech2000/kubelog/pkg/version"
+	"github.com/dantech2000/logx/pkg/version"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 )
@@ -23,8 +23,8 @@ type versionData struct {
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the version information of kubelog",
-	Long: `Display version information for kubelog.
+	Short: "Print the version information of logx",
+	Long: `Display version information for logx.
 	
 This command shows detailed information about the build, including:
 - Version number (Major.Minor.Patch)
@@ -36,16 +36,16 @@ This command shows detailed information about the build, including:
 You can use the --short flag to show only the version number,
 or specify an output format using the --output flag.`,
 	Example: `  # Show full version information
-  kubelog version
+  logx version
   
   # Show only version number
-  kubelog version --short
+  logx version --short
   
   # Get version info in JSON format
-  kubelog version --output json
+  logx version --output json
   
   # Get version info in YAML format
-  kubelog version --output yaml`,
+  logx version --output yaml`,
 	Run: runVersion,
 }
 

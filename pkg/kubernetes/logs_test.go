@@ -7,12 +7,20 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clientgotesting "k8s.io/client-go/testing"
 )
 
 func TestLogFetcher_GetLogs(t *testing.T) {
 	// Create a fake clientset
 	clientset := fake.NewSimpleClientset()
+	clientset.Fake.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() == "log" {
+			return true, &corev1.Pod{}, nil
+		}
+		return false, nil, nil
+	})
 
 	// Create a test pod with a single container
 	pod := &corev1.Pod{

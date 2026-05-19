@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dantech2000/kubelog/pkg/format"
-	"github.com/dantech2000/kubelog/pkg/kubernetes"
+	"github.com/dantech2000/logx/pkg/format"
+	"github.com/dantech2000/logx/pkg/kubernetes"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -25,10 +25,10 @@ This command provides a formatted output of container names for the given pod,
 including the total count of containers.
 
 Example usage:
-  kubelog containers my-pod -n my-namespace
-  kubelog containers my-pod -n my-namespace --output json
-  kubelog containers my-pod -n my-namespace -o yaml
-  kubelog containers my-pod -n my-namespace -o posix`,
+  logx containers my-pod -n my-namespace
+  logx containers my-pod -n my-namespace --output json
+  logx containers my-pod -n my-namespace -o yaml
+  logx containers my-pod -n my-namespace -o posix`,
 	Args: cobra.ExactArgs(1),
 	Run:  runContainers,
 }

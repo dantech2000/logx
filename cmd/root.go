@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "kubelog",
-	Short: "Kubelog - A CLI tool for enhanced Kubernetes log viewing",
-	Long: `Kubelog is a command-line interface tool designed to simplify and enhance
+	Use:   "logx [pod-name]",
+	Short: "logx - enhanced Kubernetes pod logs",
+	Long: `logx is a command-line tool designed to simplify and enhance
 the process of viewing Kubernetes pod logs.
 
 It provides features such as:
@@ -19,7 +19,18 @@ It provides features such as:
 - Listing containers within a pod
 - Color-coded output for improved readability
 
-Use "kubelog [command] --help" for more information about a command.`,
+Use "logx [command] --help" for more information about a command.`,
+	Args: cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 {
+			_ = cmd.Help()
+			return
+		}
+		if err := runLogs(cmd, args); err != nil {
+			fmt.Printf("Error running logs command: %v\n", err)
+			os.Exit(1)
+		}
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -32,7 +43,7 @@ func Execute() {
 }
 
 func init() {
-	// Here you can define flags and configuration settings that are global to all commands.
-	// For example, setting a default namespace.
-	rootCmd.PersistentFlags().StringP("namespace", "n", "default", "Kubernetes namespace")
+	addLogFlags(rootCmd)
+	rootCmd.ValidArgsFunction = completePodNames
+	_ = rootCmd.RegisterFlagCompletionFunc("container", completeContainerNames)
 }

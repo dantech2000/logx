@@ -1,4 +1,4 @@
-module github.com/dantech2000/kubelog
+module github.com/dantech2000/logx
 
 go 1.22
 
