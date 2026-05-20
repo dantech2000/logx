@@ -109,7 +109,7 @@ release-goreleaser:
     set -a
     source .env
     set +a
-    goreleaser release
+    goreleaser release --release-notes RELEASE_NOTES.md
 
 # Build and run in one step
 build-and-run *ARGS: build

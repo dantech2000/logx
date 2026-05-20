@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const maxLogLineSize = 1024 * 1024
+
 // LogFetcher handles retrieving logs from Kubernetes containers
 type LogFetcher struct {
 	// Clientset is the Kubernetes client
@@ -30,6 +32,8 @@ type LogFetcher struct {
 	Follow bool
 	// Previous indicates if logs from a previous container instance should be retrieved
 	Previous bool
+	// FilterLevel is the minimum level that will be written
+	FilterLevel logging.LogLevel
 	// Writer is where the logs will be written
 	Writer io.Writer
 }
@@ -37,12 +41,13 @@ type LogFetcher struct {
 // NewLogFetcher creates a new LogFetcher instance
 func NewLogFetcher(clientset kubernetes.Interface, namespace, podName string, follow bool, previous bool, writer io.Writer) *LogFetcher {
 	return &LogFetcher{
-		Clientset: clientset,
-		Namespace: namespace,
-		PodName:   podName,
-		Follow:    follow,
-		Previous:  previous,
-		Writer:    writer,
+		Clientset:   clientset,
+		Namespace:   namespace,
+		PodName:     podName,
+		Follow:      follow,
+		Previous:    previous,
+		FilterLevel: logging.DEBUG,
+		Writer:      writer,
 	}
 }
 
@@ -123,7 +128,8 @@ func (lf *LogFetcher) hasPreviousContainer(containerName string) (bool, error) {
 
 // LogWriter wraps an io.Writer to process logs before writing
 type LogWriter struct {
-	writer io.Writer
+	writer      io.Writer
+	filterLevel logging.LogLevel
 }
 
 // Write implements io.Writer interface
@@ -134,7 +140,11 @@ func (w *LogWriter) Write(p []byte) (n int, err error) {
 		return len(p), nil
 	}
 
-	parsedLog := logging.ParseLog(logLine)
+	entry := logging.ParseLogEntry(logLine)
+	if entry.Level < w.filterLevel {
+		return len(p), nil
+	}
+	parsedLog := logging.FormatLogEntry(entry)
 	// Write the parsed log with a newline
 	_, err = fmt.Fprintln(w.writer, parsedLog)
 	return len(p), err
@@ -142,7 +152,7 @@ func (w *LogWriter) Write(p []byte) (n int, err error) {
 
 // NewLogWriter creates a new LogWriter
 func NewLogWriter(w io.Writer) *LogWriter {
-	return &LogWriter{writer: w}
+	return &LogWriter{writer: w, filterLevel: logging.DEBUG}
 }
 
 // GetLogs retrieves logs from the specified container.
@@ -205,7 +215,9 @@ func (lf *LogFetcher) GetLogs() error {
 
 	// Create a scanner to read logs line by line
 	scanner := bufio.NewScanner(podLogs)
+	scanner.Buffer(make([]byte, 64*1024), maxLogLineSize)
 	logWriter := NewLogWriter(lf.Writer)
+	logWriter.filterLevel = lf.FilterLevel
 
 	// Process each log line
 	for scanner.Scan() {

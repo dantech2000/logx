@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dantech2000/logx/pkg/kubernetes"
+	"github.com/dantech2000/logx/pkg/logging"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -137,6 +138,10 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	filterLevel, err := logging.ParseLogLevel(options.level)
+	if err != nil {
+		return fmt.Errorf("invalid level %q: %w", options.level, err)
+	}
 
 	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
@@ -153,6 +158,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		os.Stdout,
 	)
 	logFetcher.ContainerName = options.container
+	logFetcher.FilterLevel = filterLevel
 
 	// Get logs using the new method
 	err = logFetcher.GetLogs()

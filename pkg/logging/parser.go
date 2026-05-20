@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dantech2000/logx/pkg/terminal"
 	"github.com/fatih/color"
 )
 
@@ -460,7 +461,7 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
-func formatLogEntry(entry LogEntry) string {
+func FormatLogEntry(entry LogEntry) string {
 	var parts []string
 
 	// Add timestamp if available
@@ -473,7 +474,7 @@ func formatLogEntry(entry LogEntry) string {
 
 	// Add logger type for JSON logs
 	if entry.Format == FormatJSON && entry.Logger != "" {
-		parts = append(parts, loggerColor.Sprintf("[%s]", entry.Logger))
+		parts = append(parts, loggerColor.Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
 	}
 
 	// For JSON logs, parse and format the content
@@ -490,7 +491,7 @@ func formatLogEntry(entry LogEntry) string {
 			msg := ""
 			for _, field := range jsonMessageFields {
 				if val, ok := data[field]; ok {
-					msg = fmt.Sprintf("%v", val)
+					msg = terminal.Sanitize(fmt.Sprintf("%v", val))
 					break
 				}
 			}
@@ -501,7 +502,7 @@ func formatLogEntry(entry LogEntry) string {
 				if !excludeFields[k] && k != "msg" && k != "message" {
 					formattedValue := formatValue(v)
 					fields = append(fields, fmt.Sprintf("%s=%s",
-						keyColor.Sprint(k),
+						keyColor.Sprint(terminal.Sanitize(k)),
 						formattedValue))
 				}
 			}
@@ -519,15 +520,16 @@ func formatLogEntry(entry LogEntry) string {
 			parts = append(parts, strings.Join(fields, " "))
 		} else {
 			// If JSON parsing fails, use the raw line
-			parts = append(parts, entry.RawLine)
+			parts = append(parts, terminal.Sanitize(entry.RawLine))
 		}
 	} else {
+		rawLine := terminal.Sanitize(entry.RawLine)
 		// For plain text, check if it contains error-related text
 		if entry.Level == ERROR || strings.Contains(strings.ToLower(entry.RawLine), "error") ||
 			strings.Contains(strings.ToLower(entry.RawLine), "failed") {
-			parts = append(parts, errorColor.Sprint(entry.RawLine))
+			parts = append(parts, errorColor.Sprint(rawLine))
 		} else {
-			parts = append(parts, entry.RawLine)
+			parts = append(parts, rawLine)
 		}
 	}
 
@@ -538,6 +540,7 @@ func formatLogEntry(entry LogEntry) string {
 func formatValue(v interface{}) string {
 	switch val := v.(type) {
 	case string:
+		val = terminal.Sanitize(val)
 		if val == "" {
 			return quoteColor.Sprint(`""`)
 		}
@@ -565,7 +568,7 @@ func formatValue(v interface{}) string {
 		parts := make([]string, 0, len(val))
 		for k, v := range val {
 			parts = append(parts, fmt.Sprintf("%s=%s",
-				keyColor.Sprint(k),
+				keyColor.Sprint(terminal.Sanitize(k)),
 				formatValue(v)))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, " "))
@@ -576,5 +579,5 @@ func formatValue(v interface{}) string {
 
 func ParseLog(log string) string {
 	entry := ParseLogEntry(log)
-	return formatLogEntry(entry)
+	return FormatLogEntry(entry)
 }

@@ -57,6 +57,12 @@ archives:
         formats:
           - zip
 
+release:
+  github:
+    owner: dantech2000
+    name: logx
+  mode: replace
+
 homebrew_casks:
   - name: logx
     ids:

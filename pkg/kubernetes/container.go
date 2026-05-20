@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/dantech2000/logx/pkg/terminal"
 	"github.com/fatih/color"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,9 +63,9 @@ func FormatContainerInfo(info ContainerInfo) string {
 
 	return fmt.Sprintf("%s %s [%s] (%s)",
 		statusColor.Sprint(readySymbol),
-		info.Name,
-		info.Status,
-		info.Image)
+		terminal.Sanitize(info.Name),
+		terminal.Sanitize(info.Status),
+		terminal.Sanitize(info.Image))
 }
 
 // ListContainers returns detailed information about containers in a pod

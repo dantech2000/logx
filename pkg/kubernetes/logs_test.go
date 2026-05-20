@@ -3,8 +3,10 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/dantech2000/logx/pkg/logging"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -225,5 +227,26 @@ func TestLogWriter_Write(t *testing.T) {
 				t.Errorf("Write() output = %q, want %q", got, tt.wantLogs)
 			}
 		})
+	}
+}
+
+func TestLogWriter_WriteFiltersByLevel(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewLogWriter(&buf)
+	writer.filterLevel = logging.WARN
+
+	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z INFO hidden")); err != nil {
+		t.Fatalf("Write() info error = %v", err)
+	}
+	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z ERROR shown")); err != nil {
+		t.Fatalf("Write() error error = %v", err)
+	}
+
+	got := buf.String()
+	if strings.Contains(got, "hidden") {
+		t.Fatalf("Write() included filtered log: %q", got)
+	}
+	if !strings.Contains(got, "shown") {
+		t.Fatalf("Write() missing expected log: %q", got)
 	}
 }
