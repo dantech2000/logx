@@ -21,36 +21,21 @@ brew tap dantech2000/tap
 brew install --cask logx
 ```
 
-### Manual
-
-Prerequisites:
-
-- Go 1.26 or later
-- Access to a Kubernetes cluster
-- `kubectl` configured with the appropriate context
-- `just` command runner, optional
-
-Build the binaries:
+The cask installs both `logx` and `kubectl-logx`. Because `kubectl-logx` is placed on your `PATH`, kubectl automatically discovers it as a plugin:
 
 ```bash
-git clone https://github.com/dantech2000/logx.git
-cd logx
-just build
-```
-
-Or with Go directly:
-
-```bash
-go build -o bin/logx main.go
-go build -o bin/kubectl-logx main.go
-```
-
-Move either binary into a directory on your `PATH`. Kubernetes discovers the plugin form from the `kubectl-logx` executable name:
-
-```bash
-logx --help
 kubectl logx --help
+kubectl plugin list
 ```
+
+### Release Binaries
+
+Download the archive for your platform from the GitHub releases page, then place the binaries on your `PATH`:
+
+- `logx` for standalone use
+- `kubectl-logx` for `kubectl logx`
+
+Kubernetes discovers the plugin form from the `kubectl-logx` executable name. No plugin registration is required.
 
 ## Usage
 
@@ -114,6 +99,39 @@ logx completion zsh > "${fpath[1]}/_logx"
 
 ## Development
 
+Prerequisites:
+
+Use either asdf or Nix for a consistent toolchain.
+
+With asdf:
+
+```bash
+asdf install
+```
+
+With Nix flakes:
+
+```bash
+nix develop
+```
+
+Manual prerequisites:
+
+- Go 1.26 or later
+- Access to a Kubernetes cluster for manual testing
+- `kubectl` configured with the appropriate context
+- `just` command runner
+
+Build from source:
+
+```bash
+git clone https://github.com/dantech2000/logx.git
+cd logx
+just build
+```
+
+Common tasks:
+
 ```bash
 just --list
 just build
@@ -135,7 +153,7 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The release pipeline should publish both the standalone `logx` binary and the `kubectl-logx` plugin binary.
+The release pipeline publishes both the standalone `logx` binary and the `kubectl-logx` plugin binary. It also updates the Homebrew cask in `dantech2000/homebrew-tap`.
 
 ## License
 
