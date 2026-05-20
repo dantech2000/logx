@@ -67,6 +67,13 @@ homebrew_casks:
     homepage: 'https://github.com/dantech2000/logx'
     description: 'Enhanced Kubernetes pod log viewer'
     license: 'MIT'
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/logx"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kubectl-logx"]
+          end
 
 changelog:
   sort: asc
