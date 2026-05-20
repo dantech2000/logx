@@ -112,6 +112,66 @@ func TestParseLogEntry(t *testing.T) {
 	}
 }
 
+func TestParseLogEntryBracketedStructuredText(t *testing.T) {
+	input := "[2026-05-15 00:38:05] [WARN] [api] Cross-namespace reference is enabled providerName=kubernetescrd namespace=default"
+
+	got := ParseLogEntry(input)
+
+	if got.Format != FormatBracketed {
+		t.Fatalf("Format = %v, want %v", got.Format, FormatBracketed)
+	}
+	if got.Level != WARN {
+		t.Errorf("Level = %v, want %v", got.Level, WARN)
+	}
+	if got.Logger != "api" {
+		t.Errorf("Logger = %q, want %q", got.Logger, "api")
+	}
+	if got.Message != "Cross-namespace reference is enabled" {
+		t.Errorf("Message = %q, want %q", got.Message, "Cross-namespace reference is enabled")
+	}
+	if got.Timestamp.IsZero() {
+		t.Fatal("Timestamp is zero, want parsed timestamp")
+	}
+	if got.Timestamp.Year() != 2026 || got.Timestamp.Month() != 5 || got.Timestamp.Day() != 15 ||
+		got.Timestamp.Hour() != 0 || got.Timestamp.Minute() != 38 || got.Timestamp.Second() != 5 {
+		t.Errorf("Timestamp = %v, want 2026-05-15 00:38:05", got.Timestamp)
+	}
+	if got.Fields["providerName"] != "kubernetescrd" {
+		t.Errorf("Fields[providerName] = %v, want %q", got.Fields["providerName"], "kubernetescrd")
+	}
+	if got.Fields["namespace"] != "default" {
+		t.Errorf("Fields[namespace] = %v, want %q", got.Fields["namespace"], "default")
+	}
+}
+
+func TestParseLogEntryLogfmt(t *testing.T) {
+	input := `time=2026-05-15T00:38:05Z level=info component=worker msg="job completed" job_id=abc123 duration_ms=42`
+
+	got := ParseLogEntry(input)
+
+	if got.Format != FormatLogfmt {
+		t.Fatalf("Format = %v, want %v", got.Format, FormatLogfmt)
+	}
+	if got.Level != INFO {
+		t.Errorf("Level = %v, want %v", got.Level, INFO)
+	}
+	if got.Logger != "worker" {
+		t.Errorf("Logger = %q, want %q", got.Logger, "worker")
+	}
+	if got.Message != "job completed" {
+		t.Errorf("Message = %q, want %q", got.Message, "job completed")
+	}
+	if got.Timestamp.IsZero() {
+		t.Fatal("Timestamp is zero, want parsed timestamp")
+	}
+	if got.Fields["job_id"] != "abc123" {
+		t.Errorf("Fields[job_id] = %v, want %q", got.Fields["job_id"], "abc123")
+	}
+	if got.Fields["duration_ms"] != "42" {
+		t.Errorf("Fields[duration_ms] = %v, want %q", got.Fields["duration_ms"], "42")
+	}
+}
+
 func TestParseLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string

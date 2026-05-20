@@ -17,6 +17,8 @@ type LogFormat int
 const (
 	FormatPlainText LogFormat = iota
 	FormatJSON
+	FormatBracketed
+	FormatLogfmt
 )
 
 // LogEntry represents a parsed log entry with all possible fields
@@ -96,6 +98,16 @@ var (
 	}
 )
 
+type logParser interface {
+	Parse(line string) (LogEntry, bool)
+}
+
+var logParsers = []logParser{
+	jsonLogParser{},
+	bracketedLogParser{},
+	logfmtLogParser{},
+}
+
 // detectLogFormat determines if the log line is JSON or plain text
 func detectLogFormat(line string) LogFormat {
 	line = strings.TrimSpace(line)
@@ -106,6 +118,81 @@ func detectLogFormat(line string) LogFormat {
 		}
 	}
 	return FormatPlainText
+}
+
+type jsonLogParser struct{}
+
+func (jsonLogParser) Parse(line string) (LogEntry, bool) {
+	if detectLogFormat(line) != FormatJSON {
+		return LogEntry{}, false
+	}
+	return parseJSONLog(line), true
+}
+
+type bracketedLogParser struct{}
+
+var bracketedLogRegex = regexp.MustCompile(`^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)$`)
+
+func (bracketedLogParser) Parse(line string) (LogEntry, bool) {
+	matches := bracketedLogRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return LogEntry{}, false
+	}
+
+	level, err := ParseLogLevel(matches[2])
+	if err != nil {
+		return LogEntry{}, false
+	}
+
+	message, fields := splitTrailingFields(matches[4])
+	entry := LogEntry{
+		Level:   level,
+		Message: message,
+		Format:  FormatBracketed,
+		Logger:  matches[3],
+		Fields:  fields,
+		RawLine: line,
+	}
+	if ts, err := parseTimestamp(matches[1]); err == nil {
+		entry.Timestamp = ts
+	}
+	return entry, true
+}
+
+type logfmtLogParser struct{}
+
+func (logfmtLogParser) Parse(line string) (LogEntry, bool) {
+	fields, ok := parseLogfmtFields(line)
+	if !ok {
+		return LogEntry{}, false
+	}
+
+	entry := LogEntry{
+		Level:   DEBUG,
+		Format:  FormatLogfmt,
+		Fields:  fields,
+		RawLine: line,
+	}
+	if levelValue, ok := firstStringField(fields, "level", "severity", "log_level", "lvl"); ok {
+		if level, err := ParseLogLevel(levelValue); err == nil {
+			entry.Level = level
+		}
+	}
+	if message, ok := firstStringField(fields, "msg", "message", "log"); ok {
+		entry.Message = message
+	} else {
+		entry.Message = line
+	}
+	if logger, ok := firstStringField(fields, "component", "logger", "logger_name", "source"); ok {
+		entry.Logger = logger
+	}
+	if timeValue, ok := firstStringField(fields, "time", "timestamp", "ts", "@timestamp"); ok {
+		if ts, err := parseTimestamp(timeValue); err == nil {
+			entry.Timestamp = ts
+		}
+	}
+
+	return entry, true
 }
 
 // detectLogger tries to determine which logging framework generated the log
@@ -241,10 +328,102 @@ func parsePlainTextLog(line string) LogEntry {
 	return entry
 }
 
+func splitTrailingFields(message string) (string, map[string]interface{}) {
+	parts := strings.Fields(message)
+	fields := make(map[string]interface{})
+	fieldStart := len(parts)
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		if !isSimpleField(parts[i]) {
+			break
+		}
+		key, value, _ := strings.Cut(parts[i], "=")
+		fields[key] = strings.Trim(value, `"`)
+		fieldStart = i
+	}
+
+	if len(fields) == 0 {
+		return strings.TrimSpace(message), nil
+	}
+	return strings.Join(parts[:fieldStart], " "), fields
+}
+
+func isSimpleField(value string) bool {
+	key, fieldValue, ok := strings.Cut(value, "=")
+	if !ok || key == "" || fieldValue == "" {
+		return false
+	}
+	return !strings.ContainsAny(key, " \t")
+}
+
+func parseLogfmtFields(line string) (map[string]interface{}, bool) {
+	fields := make(map[string]interface{})
+	i := 0
+
+	for i < len(line) {
+		for i < len(line) && line[i] == ' ' {
+			i++
+		}
+		if i >= len(line) {
+			break
+		}
+
+		keyStart := i
+		for i < len(line) && line[i] != '=' && line[i] != ' ' {
+			i++
+		}
+		if i >= len(line) || line[i] != '=' || i == keyStart {
+			return nil, false
+		}
+		key := line[keyStart:i]
+		i++
+
+		value := ""
+		if i < len(line) && line[i] == '"' {
+			i++
+			var builder strings.Builder
+			for i < len(line) {
+				if line[i] == '\\' && i+1 < len(line) {
+					i++
+					builder.WriteByte(line[i])
+					i++
+					continue
+				}
+				if line[i] == '"' {
+					i++
+					break
+				}
+				builder.WriteByte(line[i])
+				i++
+			}
+			value = builder.String()
+		} else {
+			valueStart := i
+			for i < len(line) && line[i] != ' ' {
+				i++
+			}
+			value = line[valueStart:i]
+		}
+		fields[key] = value
+	}
+
+	return fields, len(fields) > 0
+}
+
+func firstStringField(fields map[string]interface{}, names ...string) (string, bool) {
+	for _, name := range names {
+		if value, ok := fields[name]; ok {
+			return fmt.Sprintf("%v", value), true
+		}
+	}
+	return "", false
+}
+
 func ParseLogEntry(line string) LogEntry {
-	format := detectLogFormat(line)
-	if format == FormatJSON {
-		return parseJSONLog(line)
+	for _, parser := range logParsers {
+		if entry, ok := parser.Parse(line); ok {
+			return entry
+		}
 	}
 	return parsePlainTextLog(line)
 }
