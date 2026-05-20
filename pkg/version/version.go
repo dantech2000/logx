@@ -7,31 +7,28 @@ import (
 
 // Version holds the version information
 type Version struct {
-	Major      int
-	Minor      int
-	Patch      int
+	Version    string
 	CommitHash string
 	BuildDate  string
 }
 
 // These variables will be set at build time using ldflags
 var (
+	version    = "dev"
 	commitHash string
 	buildDate  string
 )
 
 // CurrentVersion holds the current version of the application
 var CurrentVersion = Version{
-	Major:      0,
-	Minor:      1,
-	Patch:      4,
+	Version:    version,
 	CommitHash: commitHash,
 	BuildDate:  buildDate,
 }
 
 // String returns a string representation of the version
 func (v Version) String() string {
-	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
+	return v.Version
 }
 
 // FullString returns a detailed string representation of the version

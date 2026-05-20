@@ -17,6 +17,8 @@ builds:
       - amd64
       - arm64
     ldflags:
+      - -s -w
+      - -X github.com/dantech2000/logx/pkg/version.version={{.Version}}
       - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
       - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
     main: ./main.go
@@ -32,6 +34,8 @@ builds:
       - amd64
       - arm64
     ldflags:
+      - -s -w
+      - -X github.com/dantech2000/logx/pkg/version.version={{.Version}}
       - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
       - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
     main: ./main.go
