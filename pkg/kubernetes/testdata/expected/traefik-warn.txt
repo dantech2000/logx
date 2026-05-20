@@ -1,0 +1,3 @@
+[2026-05-15 00:38:04] [WARN] [2026-05-15 00:38:04] [WARN] [unknown] Traefik can reject some encoded characters in the request path
+[2026-05-15 00:38:05] [ERROR] [2026-05-15 00:38:05] [ERROR] [unknown] Provider failed to sync providerName=kubernetes
+[2026-05-15 00:38:05] [WARN] [2026-05-15 00:38:05] [WARN] [unknown] Cross-namespace reference is enabled providerName=kubernetescrd

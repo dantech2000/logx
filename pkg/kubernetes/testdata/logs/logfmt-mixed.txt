@@ -1,0 +1,4 @@
+time=2026-05-15T00:38:01Z level=debug component=worker msg="queue poll started" queue=default
+time=2026-05-15T00:38:02Z level=info component=worker msg="job completed" job_id=abc123
+time=2026-05-15T00:38:03Z level=warn component=worker msg="retry scheduled" job_id=def456 attempt=2
+time=2026-05-15T00:38:04Z level=error component=worker msg="job failed" job_id=ghi789 error=timeout

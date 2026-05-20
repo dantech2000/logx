@@ -1,0 +1,5 @@
+[2026-05-15 00:38:04] [WARN] [unknown] Traefik can reject some encoded characters in the request path
+[2026-05-15 00:38:04] [INFO] [unknown] Traefik version 3.6.8 built on 2026-02-11T16:35:39Z version=3.6.8
+[2026-05-15 00:38:05] [INFO] [unknown] Starting provider *ingress.Provider
+[2026-05-15 00:38:05] [ERROR] [unknown] Provider failed to sync providerName=kubernetes
+[2026-05-15 00:38:05] [WARN] [unknown] Cross-namespace reference is enabled providerName=kubernetescrd

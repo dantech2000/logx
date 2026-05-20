@@ -1,0 +1,2 @@
+[2026-05-15 00:38:02] [ERROR] 2026-05-15T00:38:02Z ERROR request failed id=req-123
+[2026-05-15 00:38:03] [WARN] 2026-05-15T00:38:03Z WARN retry scheduled id=req-123

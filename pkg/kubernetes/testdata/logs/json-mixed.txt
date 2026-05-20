@@ -1,0 +1,4 @@
+{"level":"debug","ts":"2026-05-15T00:38:01Z","msg":"cache warmed","component":"api"}
+{"level":"info","ts":"2026-05-15T00:38:02Z","msg":"server started","component":"api","port":8080}
+{"level":"warn","ts":"2026-05-15T00:38:03Z","msg":"request latency high","component":"api","duration_ms":1200}
+{"level":"error","ts":"2026-05-15T00:38:04Z","msg":"request failed","component":"api","error":"timeout"}

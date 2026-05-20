@@ -1,0 +1,3 @@
+2026-05-15T00:38:02Z INFO application started
+2026-05-15T00:38:04Z WARN upstream latency high
+2026-05-15T00:38:06Z ERROR database connection failed

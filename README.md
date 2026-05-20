@@ -61,12 +61,87 @@ Options:
 - `-f, --follow`: Follow log output
 - `-l, --level`: Filter logs by level: `DEBUG`, `INFO`, `WARN`, `ERROR`
 - `-p, --previous`: Fetch logs from the previous terminated container instance
+- `--timeline`: Show pod logs and Kubernetes events together sorted by time
 
 Example:
 
 ```bash
 logx my-pod -n my-namespace -c my-container -f -l INFO
 ```
+
+### Log Level Filters
+
+`-l, --level` keeps logs at the selected level and above. For example, `-l WARN` shows `WARN` and `ERROR` entries while hiding `DEBUG` and `INFO`.
+
+Plain text logs:
+
+```bash
+kubectl logx my-pod -n my-namespace -l WARN
+```
+
+Matches lines such as:
+
+```text
+2026-05-15T00:38:03Z WARN upstream latency high
+2026-05-15T00:38:04Z ERROR upstream unavailable
+```
+
+JSON logs:
+
+```bash
+kubectl logx api-pod -n my-namespace -l ERROR
+```
+
+Matches fields such as:
+
+```json
+{"level":"error","ts":"2026-05-15T00:38:04Z","msg":"request failed","error":"timeout"}
+```
+
+Logfmt logs:
+
+```bash
+kubectl logx worker-pod -n my-namespace -l WARN
+```
+
+Matches fields such as:
+
+```text
+time=2026-05-15T00:38:03Z level=warn component=worker msg="retry scheduled"
+time=2026-05-15T00:38:04Z level=error component=worker msg="job failed"
+```
+
+Bracketed logs:
+
+```bash
+kubectl logx traefik-pod -n my-namespace -l WARN
+```
+
+Matches lines such as:
+
+```text
+[2026-05-15 00:38:04] [WARN] [unknown] Traefik can reject some encoded characters in the request path
+[2026-05-15 00:38:05] [ERROR] [unknown] Provider failed to sync providerName=kubernetes
+```
+
+### Logs And Events Timeline
+
+Use `--timeline` to view pod logs and Kubernetes events together in timestamp order:
+
+```bash
+kubectl logx my-pod -n my-namespace -c my-container --timeline -l WARN
+```
+
+Example output:
+
+```text
+[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/my-pod
+[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed
+[2026-05-15 00:38:04] [LOG] [ERROR] request failed
+[2026-05-15 00:38:05] [EVENT] [Warning] BackOff: Back-off restarting failed container
+```
+
+`--timeline` is intended for point-in-time troubleshooting and cannot be combined with `--follow`.
 
 List containers in a pod:
 

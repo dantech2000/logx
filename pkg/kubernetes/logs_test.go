@@ -3,8 +3,10 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dantech2000/logx/pkg/logging"
 	corev1 "k8s.io/api/core/v1"
@@ -12,7 +14,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	clientgotesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
 )
+
+type logFilterCase struct {
+	name     string
+	level    logging.LogLevel
+	hidden   []string
+	expected []string
+}
 
 func TestLogFetcher_GetLogs(t *testing.T) {
 	// Create a fake clientset
@@ -110,6 +120,462 @@ func TestLogFetcher_GetLogs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLogFetcher_GetLogsFiltersByLevel(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture string
+		cases   []logFilterCase
+	}{
+		{
+			name:    "Traefik bracketed logs",
+			fixture: "testdata/logs/traefik.txt",
+			cases: []logFilterCase{
+				{
+					name:     "DEBUG includes all parsed levels",
+					level:    logging.DEBUG,
+					expected: []string{"encoded characters", "Traefik version", "Starting provider", "Provider failed", "Cross-namespace reference"},
+				},
+				{
+					name:     "INFO hides lower levels",
+					level:    logging.INFO,
+					expected: []string{"encoded characters", "Traefik version", "Starting provider", "Provider failed", "Cross-namespace reference"},
+				},
+				{
+					name:     "WARN hides info",
+					level:    logging.WARN,
+					hidden:   []string{"Traefik version", "Starting provider"},
+					expected: []string{"encoded characters", "Provider failed", "Cross-namespace reference"},
+				},
+				{
+					name:     "ERROR only includes errors",
+					level:    logging.ERROR,
+					hidden:   []string{"encoded characters", "Traefik version", "Starting provider", "Cross-namespace reference"},
+					expected: []string{"Provider failed"},
+				},
+			},
+		},
+		{
+			name:    "JSON logs",
+			fixture: "testdata/logs/json-mixed.txt",
+			cases:   logLevelFilterCases("cache warmed", "server started", "request latency high", "request failed"),
+		},
+		{
+			name:    "Logfmt logs",
+			fixture: "testdata/logs/logfmt-mixed.txt",
+			cases:   logLevelFilterCases("queue poll started", "job completed", "retry scheduled", "job failed"),
+		},
+		{
+			name:    "Plain text logs",
+			fixture: "testdata/logs/plaintext-mixed.txt",
+			cases: []logFilterCase{
+				{
+					name:     "DEBUG includes all parsed levels",
+					level:    logging.DEBUG,
+					expected: []string{"scheduler tick", "request accepted", "upstream latency high", "upstream unavailable", "line without an explicit level"},
+				},
+				{
+					name:     "INFO hides debug and unknown",
+					level:    logging.INFO,
+					hidden:   []string{"scheduler tick", "line without an explicit level"},
+					expected: []string{"request accepted", "upstream latency high", "upstream unavailable"},
+				},
+				{
+					name:     "WARN hides info debug and unknown",
+					level:    logging.WARN,
+					hidden:   []string{"scheduler tick", "request accepted", "line without an explicit level"},
+					expected: []string{"upstream latency high", "upstream unavailable"},
+				},
+				{
+					name:     "ERROR only includes errors",
+					level:    logging.ERROR,
+					hidden:   []string{"scheduler tick", "request accepted", "upstream latency high", "line without an explicit level"},
+					expected: []string{"upstream unavailable"},
+				},
+			},
+		},
+		{
+			name:    "Multiline stack trace logs",
+			fixture: "testdata/logs/multiline-stacktrace.txt",
+			cases: []logFilterCase{
+				{
+					name:     "DEBUG includes continuation lines",
+					level:    logging.DEBUG,
+					expected: []string{"request accepted", "request failed", "RuntimeException", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
+				},
+				{
+					name:     "INFO hides continuation lines without levels",
+					level:    logging.INFO,
+					hidden:   []string{"RuntimeException", "Client.call", "Handler.handle", "retry attempt 2"},
+					expected: []string{"request accepted", "request failed", "retry scheduled"},
+				},
+				{
+					name:     "WARN hides info and continuation lines",
+					level:    logging.WARN,
+					hidden:   []string{"request accepted", "RuntimeException", "Client.call", "Handler.handle", "retry attempt 2"},
+					expected: []string{"request failed", "retry scheduled"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs, err := os.ReadFile(tt.fixture)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+
+			for _, tc := range tt.cases {
+				t.Run(tc.name, func(t *testing.T) {
+					var buf bytes.Buffer
+					fetcher := newTestLogFetcher(t, string(logs), &buf)
+					fetcher.FilterLevel = tc.level
+
+					if err := fetcher.GetLogs(); err != nil {
+						t.Fatalf("GetLogs() error = %v", err)
+					}
+
+					assertOutputContains(t, buf.String(), tc.expected, tc.hidden)
+				})
+			}
+		})
+	}
+}
+
+func logLevelFilterCases(debugMsg, infoMsg, warnMsg, errorMsg string) []logFilterCase {
+	return []logFilterCase{
+		{
+			name:     "DEBUG includes all parsed levels",
+			level:    logging.DEBUG,
+			expected: []string{debugMsg, infoMsg, warnMsg, errorMsg},
+		},
+		{
+			name:     "INFO hides debug",
+			level:    logging.INFO,
+			hidden:   []string{debugMsg},
+			expected: []string{infoMsg, warnMsg, errorMsg},
+		},
+		{
+			name:     "WARN hides info and debug",
+			level:    logging.WARN,
+			hidden:   []string{debugMsg, infoMsg},
+			expected: []string{warnMsg, errorMsg},
+		},
+		{
+			name:     "ERROR only includes errors",
+			level:    logging.ERROR,
+			hidden:   []string{debugMsg, infoMsg, warnMsg},
+			expected: []string{errorMsg},
+		},
+	}
+}
+
+func assertOutputContains(t *testing.T, got string, expected []string, hidden []string) {
+	t.Helper()
+
+	for _, hiddenText := range hidden {
+		if strings.Contains(got, hiddenText) {
+			t.Fatalf("output included filtered log %q: %q", hiddenText, got)
+		}
+	}
+	for _, expectedText := range expected {
+		if !strings.Contains(got, expectedText) {
+			t.Fatalf("output missing expected log %q: %q", expectedText, got)
+		}
+	}
+}
+
+func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	var gotOptions *corev1.PodLogOptions
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		genericAction, ok := action.(clientgotesting.GenericAction)
+		if !ok {
+			t.Fatalf("expected GenericAction, got %T", action)
+		}
+		options, ok := genericAction.GetValue().(*corev1.PodLogOptions)
+		if !ok {
+			t.Fatalf("expected *corev1.PodLogOptions, got %T", genericAction.GetValue())
+		}
+		gotOptions = options
+		return true, &runtime.Unknown{Raw: []byte("2026-05-15T00:38:04Z ERROR request failed")}, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "app", Image: "app-image"},
+				{Name: "sidecar", Image: "sidecar-image"},
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "app", RestartCount: 1},
+				{Name: "sidecar", RestartCount: 0},
+			},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Error creating test pod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", true, true, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.ERROR
+
+	if err := fetcher.GetLogs(); err != nil {
+		t.Fatalf("GetLogs() error = %v", err)
+	}
+	if gotOptions == nil {
+		t.Fatal("GetLogs() did not request pod logs")
+	}
+	if gotOptions.Container != "app" {
+		t.Fatalf("Container = %q, want %q", gotOptions.Container, "app")
+	}
+	if !gotOptions.Follow {
+		t.Fatal("Follow = false, want true")
+	}
+	if !gotOptions.Previous {
+		t.Fatal("Previous = false, want true")
+	}
+}
+
+func TestLogFetcher_GetLogsFormatsDeterministicFixtureOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		fixture  string
+		expected string
+		level    logging.LogLevel
+	}{
+		{
+			name:     "plain text WARN output",
+			fixture:  "testdata/logs/plaintext-mixed.txt",
+			expected: "testdata/expected/plaintext-warn.txt",
+			level:    logging.WARN,
+		},
+		{
+			name:     "bracketed WARN output",
+			fixture:  "testdata/logs/traefik.txt",
+			expected: "testdata/expected/traefik-warn.txt",
+			level:    logging.WARN,
+		},
+		{
+			name:     "multiline WARN output",
+			fixture:  "testdata/logs/multiline-stacktrace.txt",
+			expected: "testdata/expected/multiline-warn.txt",
+			level:    logging.WARN,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs, err := os.ReadFile(tt.fixture)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			want, err := os.ReadFile(tt.expected)
+			if err != nil {
+				t.Fatalf("read expected output: %v", err)
+			}
+
+			var buf bytes.Buffer
+			fetcher := newTestLogFetcher(t, string(logs), &buf)
+			fetcher.FilterLevel = tt.level
+
+			if err := fetcher.GetLogs(); err != nil {
+				t.Fatalf("GetLogs() error = %v", err)
+			}
+			if got := buf.String(); got != string(want) {
+				t.Fatalf("output = %q, want %q", got, string(want))
+			}
+		})
+	}
+}
+
+func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
+	logs := strings.Join([]string{
+		"2026-05-15T00:38:02Z INFO application started",
+		"2026-05-15T00:38:04Z ERROR request failed",
+	}, "\n")
+	clientset := fake.NewSimpleClientset()
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte(logs)}, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "app-image"}},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Error creating test pod: %v", err)
+	}
+
+	events := []*corev1.Event{
+		testPodEvent("test-pod", "Normal", "Scheduled", "Successfully assigned default/test-pod", "2026-05-15T00:38:01Z"),
+		testPodEvent("test-pod", "Warning", "Unhealthy", "Readiness probe failed", "2026-05-15T00:38:03Z"),
+		testPodEvent("other-pod", "Warning", "BackOff", "Back-off restarting failed container", "2026-05-15T00:38:00Z"),
+	}
+	for _, event := range events {
+		if _, err := clientset.CoreV1().Events("default").Create(context.Background(), event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.INFO
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	assertInOrder(t, got, []string{
+		"[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/test-pod",
+		"[2026-05-15 00:38:02] [LOG] [INFO] 2026-05-15T00:38:02Z INFO application started",
+		"[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed",
+		"[2026-05-15 00:38:04] [LOG] [ERROR] 2026-05-15T00:38:04Z ERROR request failed",
+	})
+	if strings.Contains(got, "other-pod") || strings.Contains(got, "BackOff") {
+		t.Fatalf("GetTimeline() included event for another pod: %q", got)
+	}
+}
+
+func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
+	logs, err := os.ReadFile("testdata/timeline/logs.txt")
+	if err != nil {
+		t.Fatalf("read timeline logs fixture: %v", err)
+	}
+	want, err := os.ReadFile("testdata/timeline/expected-warn.txt")
+	if err != nil {
+		t.Fatalf("read timeline expected output: %v", err)
+	}
+
+	pod := readPodFixture(t, "testdata/pods/single-container.yaml")
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: logs}, nil
+	})
+	for _, event := range readEventListFixture(t, "testdata/timeline/events.yaml").Items {
+		event := event
+		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, pod.Namespace, pod.Name, false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.WARN
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+	if got := buf.String(); got != string(want) {
+		t.Fatalf("timeline output = %q, want %q", got, string(want))
+	}
+}
+
+func readEventListFixture(t *testing.T, path string) *corev1.EventList {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read event fixture: %v", err)
+	}
+	var events corev1.EventList
+	if err := yaml.Unmarshal(data, &events); err != nil {
+		t.Fatalf("unmarshal event fixture: %v", err)
+	}
+	for i := range events.Items {
+		if events.Items[i].Namespace == "" {
+			events.Items[i].Namespace = metav1.NamespaceDefault
+		}
+	}
+	return &events
+}
+
+func testPodEvent(podName, eventType, reason, message, timestamp string) *corev1.Event {
+	ts, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		panic(err)
+	}
+	return &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName + "." + reason,
+			Namespace: "default",
+		},
+		InvolvedObject: corev1.ObjectReference{
+			Kind:      "Pod",
+			Name:      podName,
+			Namespace: "default",
+		},
+		Type:           eventType,
+		Reason:         reason,
+		Message:        message,
+		FirstTimestamp: metav1.NewTime(ts),
+		LastTimestamp:  metav1.NewTime(ts),
+	}
+}
+
+func assertInOrder(t *testing.T, got string, expected []string) {
+	t.Helper()
+
+	lastIndex := -1
+	for _, value := range expected {
+		index := strings.Index(got, value)
+		if index == -1 {
+			t.Fatalf("output missing %q: %q", value, got)
+		}
+		if index < lastIndex {
+			t.Fatalf("output has %q out of order: %q", value, got)
+		}
+		lastIndex = index
+	}
+}
+
+func newTestLogFetcher(t *testing.T, logs string, writer *bytes.Buffer) *LogFetcher {
+	t.Helper()
+
+	clientset := fake.NewSimpleClientset()
+	clientset.Fake.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() == "log" {
+			return true, &runtime.Unknown{Raw: []byte(logs)}, nil
+		}
+		return false, nil, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "test-container",
+					Image: "test-image",
+				},
+			},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Error creating test pod: %v", err)
+	}
+
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, writer)
+	fetcher.ContainerName = "test-container"
+	return fetcher
 }
 
 func TestLogFetcher_hasPreviousContainer(t *testing.T) {

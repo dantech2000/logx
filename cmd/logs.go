@@ -19,6 +19,7 @@ type logOptions struct {
 	level     string
 	podName   string
 	previous  bool
+	timeline  bool
 }
 
 var logsCmd = &cobra.Command{
@@ -50,6 +51,7 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("follow", "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP("level", "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
 	cmd.Flags().BoolP("previous", "p", false, "Get previous terminated container logs")
+	cmd.Flags().Bool("timeline", false, "Show pod logs and Kubernetes events together sorted by time")
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -124,12 +126,18 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting previous flag: %v", err)
 	}
 
+	timeline, err := cmd.Flags().GetBool("timeline")
+	if err != nil {
+		return nil, fmt.Errorf("error getting timeline flag: %v", err)
+	}
+
 	return &logOptions{
 		container: container,
 		follow:    follow,
 		level:     level,
 		podName:   args[0],
 		previous:  previous,
+		timeline:  timeline,
 	}, nil
 }
 
@@ -160,8 +168,15 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.ContainerName = options.container
 	logFetcher.FilterLevel = filterLevel
 
-	// Get logs using the new method
-	err = logFetcher.GetLogs()
+	if options.timeline && options.follow {
+		return fmt.Errorf("--timeline cannot be used with --follow")
+	}
+
+	if options.timeline {
+		err = logFetcher.GetTimeline()
+	} else {
+		err = logFetcher.GetLogs()
+	}
 	if err != nil {
 		return fmt.Errorf("error fetching logs: %v", err)
 	}

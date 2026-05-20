@@ -159,43 +159,8 @@ func NewLogWriter(w io.Writer) *LogWriter {
 // If no container is specified, it will prompt the user to select one.
 // It handles both current and previous container instances based on the Previous flag.
 func (lf *LogFetcher) GetLogs() error {
-	// Get container name first if not specified
-	if lf.ContainerName == "" {
-		containerName, err := lf.getSingleContainerName()
-		if err != nil {
-			return fmt.Errorf("failed to get container name: %w", err)
-		}
-		lf.ContainerName = containerName
-	}
-
-	// Validate container exists
-	ctx := context.Background()
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("error fetching pod details: %w", err)
-	}
-
-	containerExists := false
-	for _, container := range pod.Spec.Containers {
-		if container.Name == lf.ContainerName {
-			containerExists = true
-			break
-		}
-	}
-	if !containerExists {
-		return fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
-	}
-
-	// Check for previous container if -p flag is used
-	if lf.Previous {
-		hasPrevious, err := lf.hasPreviousContainer(lf.ContainerName)
-		if err != nil {
-			return fmt.Errorf("failed to check for previous container: %w", err)
-		}
-		if !hasPrevious {
-			return fmt.Errorf("no previous terminated container found for '%s' in pod '%s'\nNote: The -p flag only works for containers that have terminated or restarted",
-				lf.ContainerName, lf.PodName)
-		}
+	if err := lf.prepareLogRequest(); err != nil {
+		return err
 	}
 
 	// Now proceed with log fetching
@@ -205,7 +170,7 @@ func (lf *LogFetcher) GetLogs() error {
 		Previous:  lf.Previous,
 	}
 
-	ctx = context.Background()
+	ctx := context.Background()
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
 	podLogs, err := req.Stream(ctx)
 	if err != nil {

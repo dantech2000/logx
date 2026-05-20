@@ -1,0 +1,5 @@
+2026-05-15T00:38:01Z DEBUG scheduler tick
+2026-05-15T00:38:02Z INFO request accepted
+2026-05-15T00:38:03Z WARN upstream latency high
+2026-05-15T00:38:04Z ERROR upstream unavailable
+line without an explicit level
