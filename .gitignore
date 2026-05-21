@@ -4,3 +4,7 @@ dist/
 # pre-commit
 .pre-commit-config.yaml
 .env
+
+# Local Kubernetes capture output
+logx-samples/
+logx-release-sample/
