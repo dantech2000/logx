@@ -12,5 +12,16 @@ const (
 
 // String returns the string representation of a LogLevel
 func (l LogLevel) String() string {
-	return [...]string{"DEBUG", "INFO", "WARN", "ERROR"}[l]
+	switch l {
+	case DEBUG:
+		return "DEBUG"
+	case INFO:
+		return "INFO"
+	case WARN:
+		return "WARN"
+	case ERROR:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
 }

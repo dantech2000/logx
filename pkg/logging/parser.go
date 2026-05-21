@@ -7,9 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/dantech2000/logx/pkg/terminal"
-	"github.com/fatih/color"
 )
 
 // LogFormat represents different log formats we can handle
@@ -30,38 +27,23 @@ type LogEntry struct {
 	Logger    string
 	Fields    map[string]interface{}
 	Timestamp time.Time
-	RawLine   string // Store the original line
+	RawLine   string // Original payload used as fallback display text.
 }
-
-var logLevelColors = map[LogLevel]*color.Color{
-	DEBUG: color.New(color.FgCyan),
-	INFO:  color.New(color.FgGreen),
-	WARN:  color.New(color.FgYellow),
-	ERROR: color.New(color.FgRed),
-}
-
-// Colors for different log components
-var (
-	timestampColor = color.New(color.FgBlue)
-	loggerColor    = color.New(color.FgMagenta)
-	keyColor       = color.New(color.FgCyan)
-	valueColor     = color.New(color.FgWhite)
-	quoteColor     = color.New(color.FgHiBlack)
-	errorColor     = color.New(color.FgRed, color.Bold)
-)
 
 // Common field mappings for different JSON log formats
 var (
 	// Level field names across different loggers
 	jsonLevelFields = []string{
-		"level",     // Common
-		"severity",  // Google Cloud
-		"log_level", // Custom
-		"loglevel",  // Custom
-		"@level",    // Bunyan
-		"levelname", // Python logging
-		"status",    // NGINX
-		"LEVEL",     // Some uppercase variants
+		"level",         // Common
+		"severity",      // Google Cloud
+		"log_level",     // Custom
+		"loglevel",      // Custom
+		"log.level",     // ECS/Winston
+		"severity_text", // OpenTelemetry
+		"severityText",  // OpenTelemetry
+		"@level",        // Bunyan
+		"levelname",     // Python logging
+		"LEVEL",         // Some uppercase variants
 	}
 
 	// Message field names
@@ -70,6 +52,7 @@ var (
 		"msg",      // Zap, Logrus
 		"log",      // Docker
 		"text",     // Custom
+		"body",     // OpenTelemetry
 		"@message", // Bunyan
 		"MESSAGE",  // Systemd
 	}
@@ -104,30 +87,62 @@ type logParser interface {
 }
 
 var logParsers = []logParser{
+	// Ordered from most structured to least structured. Plain text is the fallback.
 	jsonLogParser{},
 	bracketedLogParser{},
 	logfmtLogParser{},
 }
 
-// detectLogFormat determines if the log line is JSON or plain text
-func detectLogFormat(line string) LogFormat {
-	line = strings.TrimSpace(line)
-	if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
-		var js map[string]interface{}
-		if json.Unmarshal([]byte(line), &js) == nil {
-			return FormatJSON
-		}
-	}
-	return FormatPlainText
+var (
+	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s+(.*)$`)
+	plainTextTimestampRegex        = regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
+	plainTextLevelRegex            = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)([^[:alnum:]_]|$)`)
+)
+
+var httpContextFields = buildStringSet([]string{
+	"method",
+	"path",
+	"route",
+	"uri",
+	"url",
+	"request",
+	"request.method",
+	"request.path",
+	"requestMethod",
+	"requestPath",
+	"controller",
+	"action",
+	"http.method",
+	"http.route",
+	"http.target",
+	"http.url",
+})
+
+var httpStatusFields = []string{
+	"status",
+	"status_code",
+	"statusCode",
+	"http.status_code",
+	"response.status",
+	"response.status_code",
+	"responseStatusCode",
 }
 
 type jsonLogParser struct{}
 
 func (jsonLogParser) Parse(line string) (LogEntry, bool) {
-	if detectLogFormat(line) != FormatJSON {
+	trimmedLine := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmedLine, "{") || !strings.HasSuffix(trimmedLine, "}") {
 		return LogEntry{}, false
 	}
-	return parseJSONLog(line), true
+
+	var data map[string]interface{}
+	decoder := json.NewDecoder(strings.NewReader(trimmedLine))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
+		return LogEntry{}, false
+	}
+	return parseJSONLog(trimmedLine, data), true
 }
 
 type bracketedLogParser struct{}
@@ -196,8 +211,8 @@ func (logfmtLogParser) Parse(line string) (LogEntry, bool) {
 	return entry, true
 }
 
-// detectLogger tries to determine which logging framework generated the log
-func detectLogger(data map[string]interface{}) string {
+// detectLoggerLabel returns a display label for known structured logging formats.
+func detectLoggerLabel(data map[string]interface{}) string {
 	switch {
 	case data["caller"] != nil && data["ts"] != nil:
 		return "zap"
@@ -212,7 +227,7 @@ func detectLogger(data map[string]interface{}) string {
 	case data["level"] != nil && data["msg"] != nil:
 		return "logrus"
 	default:
-		return "unknown"
+		return ""
 	}
 }
 
@@ -226,78 +241,151 @@ func parseTimestamp(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeStr)
 }
 
-// parseJSONLog attempts to parse a JSON log entry
-func parseJSONLog(line string) LogEntry {
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &data); err != nil {
-		return LogEntry{
-			Level:   DEBUG,
-			Message: line,
-			Format:  FormatJSON,
-		}
-	}
-
-	logger := detectLogger(data)
+func parseJSONLog(line string, data map[string]interface{}) LogEntry {
+	logger := detectLoggerLabel(data)
 	entry := LogEntry{
 		Format:  FormatJSON,
 		Fields:  data,
 		Logger:  logger,
 		RawLine: line,
 	}
-
-	// Find and parse level
-	for _, field := range jsonLevelFields {
-		if val, ok := data[field]; ok {
-			// Handle both string and numeric levels
-			levelStr := fmt.Sprintf("%v", val)
-			if level, err := ParseLogLevel(levelStr); err == nil {
-				entry.Level = level
-				break
-			}
-		}
-	}
-
-	// Find message
-	for _, field := range jsonMessageFields {
-		if val, ok := data[field]; ok {
-			entry.Message = fmt.Sprintf("%v", val)
-			break
-		}
-	}
-
-	// If no message found, try error field or full line
-	if entry.Message == "" {
-		if err, ok := data["error"]; ok {
-			entry.Message = fmt.Sprintf("%v", err)
-		} else {
-			entry.Message = line
-		}
-	}
-
-	// Parse timestamp
-	for _, field := range jsonTimeFields {
-		if val, ok := data[field]; ok {
-			// Handle numeric timestamps (milliseconds since epoch)
-			if numTime, ok := val.(float64); ok {
-				msec := int64(numTime)
-				if msec > 1e11 { // Assuming milliseconds if number is large enough
-					entry.Timestamp = time.Unix(0, msec*int64(time.Millisecond))
-				} else {
-					entry.Timestamp = time.Unix(msec, 0)
-				}
-				break
-			}
-			// Try parsing string timestamps
-			if timeStr, ok := val.(string); ok {
-				if ts, err := parseTimestamp(timeStr); err == nil {
-					entry.Timestamp = ts
-					break
-				}
-			}
-		}
-	}
+	entry.Level = parseJSONLevel(data)
+	entry.Message = parseJSONMessage(line, data)
+	entry.Timestamp = parseJSONTimestamp(data)
 
 	return entry
+}
+
+func parseJSONLevel(data map[string]interface{}) LogLevel {
+	for _, field := range jsonLevelFields {
+		if val, ok := fieldValue(data, field); ok {
+			levelStr := fmt.Sprintf("%v", val)
+			if level, err := ParseLogLevel(levelStr); err == nil {
+				return level
+			}
+		}
+	}
+	if level, ok := parseHTTPStatusLevel(data); ok {
+		return level
+	}
+	return DEBUG
+}
+
+func parseJSONMessage(line string, data map[string]interface{}) string {
+	for _, field := range jsonMessageFields {
+		if val, ok := fieldValue(data, field); ok {
+			return fmt.Sprintf("%v", val)
+		}
+	}
+
+	if err, ok := data["error"]; ok {
+		return fmt.Sprintf("%v", err)
+	}
+	return line
+}
+
+func parseJSONTimestamp(data map[string]interface{}) time.Time {
+	for _, field := range jsonTimeFields {
+		if val, ok := fieldValue(data, field); ok {
+			if numTime, ok := val.(float64); ok {
+				return parseUnixTimestamp(numTime)
+			}
+			if numTime, ok := val.(json.Number); ok {
+				if ts, ok := parseUnixTimestampString(numTime.String()); ok {
+					return ts
+				}
+			}
+			if timeStr, ok := val.(string); ok {
+				if ts, ok := parseUnixTimestampString(timeStr); ok {
+					return ts
+				}
+				if ts, err := parseTimestamp(timeStr); err == nil {
+					return ts
+				}
+			}
+		}
+	}
+	return time.Time{}
+}
+
+func parseUnixTimestamp(value float64) time.Time {
+	return parseUnixTimestampInt(int64(value))
+}
+
+func parseUnixTimestampInt(timestamp int64) time.Time {
+	switch {
+	case timestamp >= 1e18:
+		return time.Unix(0, timestamp)
+	case timestamp >= 1e15:
+		return time.Unix(0, timestamp*int64(time.Microsecond))
+	case timestamp >= 1e11:
+		return time.Unix(0, timestamp*int64(time.Millisecond))
+	default:
+		return time.Unix(timestamp, 0)
+	}
+}
+
+func parseUnixTimestampString(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if timestamp, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return parseUnixTimestampInt(timestamp), true
+	}
+	timestamp, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parseUnixTimestamp(timestamp), true
+}
+
+func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
+	if !hasHTTPContext(data) {
+		return DEBUG, false
+	}
+
+	statusValue, ok := firstField(data, httpStatusFields...)
+	if !ok {
+		return DEBUG, false
+	}
+
+	var status int
+	switch value := statusValue.(type) {
+	case float64:
+		status = int(value)
+	case json.Number:
+		parsedStatus, err := strconv.Atoi(value.String())
+		if err != nil {
+			return DEBUG, false
+		}
+		status = parsedStatus
+	case string:
+		parsedStatus, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return DEBUG, false
+		}
+		status = parsedStatus
+	default:
+		return DEBUG, false
+	}
+
+	switch {
+	case status >= 500:
+		return ERROR, true
+	case status >= 400:
+		return WARN, true
+	case status >= 100:
+		return DEBUG, true
+	default:
+		return DEBUG, false
+	}
+}
+
+func hasHTTPContext(data map[string]interface{}) bool {
+	for field := range httpContextFields {
+		if _, ok := fieldValue(data, field); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // parsePlainTextLog parses a plain text log entry
@@ -309,17 +397,15 @@ func parsePlainTextLog(line string) LogEntry {
 	}
 
 	// First try to extract timestamp
-	timeRegex := regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
-	if timeStr := timeRegex.FindString(line); timeStr != "" {
+	if timeStr := plainTextTimestampRegex.FindString(line); timeStr != "" {
 		if ts, err := parseTimestamp(timeStr); err == nil {
 			entry.Timestamp = ts
 		}
 	}
 
 	// Try to extract log level
-	levelRegex := regexp.MustCompile(`(?i)(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)`)
-	if match := levelRegex.FindString(line); match != "" {
-		if level, err := ParseLogLevel(match); err == nil {
+	if matches := plainTextLevelRegex.FindStringSubmatch(line); matches != nil {
+		if level, err := ParseLogLevel(matches[2]); err == nil {
 			entry.Level = level
 		}
 	}
@@ -420,6 +506,35 @@ func firstStringField(fields map[string]interface{}, names ...string) (string, b
 	return "", false
 }
 
+func firstField(fields map[string]interface{}, names ...string) (interface{}, bool) {
+	for _, name := range names {
+		if value, ok := fieldValue(fields, name); ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) {
+	if value, ok := fields[name]; ok {
+		return value, true
+	}
+
+	current := interface{}(fields)
+	for _, part := range strings.Split(name, ".") {
+		currentFields, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		value, ok := currentFields[part]
+		if !ok {
+			return nil, false
+		}
+		current = value
+	}
+	return current, true
+}
+
 func ParseLogEntry(line string) LogEntry {
 	for _, parser := range logParsers {
 		if entry, ok := parser.Parse(line); ok {
@@ -429,20 +544,35 @@ func ParseLogEntry(line string) LogEntry {
 	return parsePlainTextLog(line)
 }
 
+func ParseKubernetesLogEntry(line string) LogEntry {
+	if timestamp, payload, ok := splitKubernetesTimestampPrefix(line); ok {
+		entry := ParseLogEntry(payload)
+		entry.Timestamp = timestamp
+		return entry
+	}
+	return ParseLogEntry(line)
+}
+
+func splitKubernetesTimestampPrefix(line string) (time.Time, string, bool) {
+	matches := kubernetesTimestampPrefixRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return time.Time{}, "", false
+	}
+	timestamp, err := parseTimestamp(matches[1])
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	return timestamp, matches[2], true
+}
+
 // ParseLogLevel parses both string and numeric log levels
 func ParseLogLevel(level string) (LogLevel, error) {
-	// Try parsing numeric levels first
+	level = strings.TrimSpace(level)
 	if numLevel, err := strconv.Atoi(level); err == nil {
-		switch {
-		case numLevel <= 10:
-			return DEBUG, nil // DEBUG
-		case numLevel <= 20:
-			return INFO, nil // INFO
-		case numLevel <= 30:
-			return WARN, nil // WARN
-		case numLevel > 30:
-			return ERROR, nil // ERROR
-		}
+		return parseNumericLogLevel(numLevel), nil
+	}
+	if numLevel, err := strconv.ParseFloat(level, 64); err == nil && float64(int(numLevel)) == numLevel {
+		return parseNumericLogLevel(int(numLevel)), nil
 	}
 
 	normalizedLevel := strings.ToUpper(level)
@@ -461,123 +591,39 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
-func FormatLogEntry(entry LogEntry) string {
-	var parts []string
-
-	// Add timestamp if available
-	if !entry.Timestamp.IsZero() {
-		parts = append(parts, timestampColor.Sprintf("[%s]", entry.Timestamp.Format("2006-01-02 15:04:05")))
+func parseNumericLogLevel(level int) LogLevel {
+	switch level {
+	case 0:
+		return INFO
+	case 1:
+		return WARN
+	case 2:
+		return ERROR
 	}
 
-	// Add level with appropriate color
-	parts = append(parts, logLevelColors[entry.Level].Sprint(fmt.Sprintf("[%s]", entry.Level)))
-
-	// Add logger type for JSON logs
-	if entry.Format == FormatJSON && entry.Logger != "" {
-		parts = append(parts, loggerColor.Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
-	}
-
-	// For JSON logs, parse and format the content
-	if entry.Format == FormatJSON {
-		// Format the JSON fields with colors
-		var data map[string]interface{}
-		if err := json.Unmarshal([]byte(entry.RawLine), &data); err == nil {
-			excludeFields := map[string]bool{
-				"level": true, "severity": true, "log_level": true,
-				"time": true, "timestamp": true, "@timestamp": true,
-			}
-
-			// Format message field specially
-			msg := ""
-			for _, field := range jsonMessageFields {
-				if val, ok := data[field]; ok {
-					msg = terminal.Sanitize(fmt.Sprintf("%v", val))
-					break
-				}
-			}
-
-			// Build the formatted JSON output
-			var fields []string
-			for k, v := range data {
-				if !excludeFields[k] && k != "msg" && k != "message" {
-					formattedValue := formatValue(v)
-					fields = append(fields, fmt.Sprintf("%s=%s",
-						keyColor.Sprint(terminal.Sanitize(k)),
-						formattedValue))
-				}
-			}
-
-			// If we found a message, put it first
-			if msg != "" {
-				if entry.Level == ERROR || strings.Contains(strings.ToLower(msg), "error") ||
-					strings.Contains(strings.ToLower(msg), "warn") ||
-					strings.Contains(strings.ToLower(msg), "failed") {
-					msg = errorColor.Sprint(msg)
-				}
-				fields = append([]string{msg}, fields...)
-			}
-
-			parts = append(parts, strings.Join(fields, " "))
-		} else {
-			// If JSON parsing fails, use the raw line
-			parts = append(parts, terminal.Sanitize(entry.RawLine))
-		}
-	} else {
-		rawLine := terminal.Sanitize(entry.RawLine)
-		// For plain text, check if it contains error-related text
-		if entry.Level == ERROR || strings.Contains(strings.ToLower(entry.RawLine), "error") ||
-			strings.Contains(strings.ToLower(entry.RawLine), "failed") {
-			parts = append(parts, errorColor.Sprint(rawLine))
-		} else {
-			parts = append(parts, rawLine)
-		}
-	}
-
-	return strings.Join(parts, " ")
-}
-
-// formatValue formats a value with appropriate coloring based on its type
-func formatValue(v interface{}) string {
-	switch val := v.(type) {
-	case string:
-		val = terminal.Sanitize(val)
-		if val == "" {
-			return quoteColor.Sprint(`""`)
-		}
-		// Check if the string needs quotes (contains spaces or special characters)
-		if strings.ContainsAny(val, " =,\"'[]{}()") {
-			return fmt.Sprintf("%s%s%s",
-				quoteColor.Sprint(`"`),
-				valueColor.Sprint(val),
-				quoteColor.Sprint(`"`))
-		}
-		return valueColor.Sprint(val)
-	case nil:
-		return quoteColor.Sprint("null")
-	case bool:
-		if val {
-			return valueColor.Sprint("true")
-		}
-		return valueColor.Sprint("false")
-	case float64:
-		if float64(int64(val)) == val {
-			return valueColor.Sprintf("%d", int64(val))
-		}
-		return valueColor.Sprintf("%.2f", val)
-	case map[string]interface{}:
-		parts := make([]string, 0, len(val))
-		for k, v := range val {
-			parts = append(parts, fmt.Sprintf("%s=%s",
-				keyColor.Sprint(terminal.Sanitize(k)),
-				formatValue(v)))
-		}
-		return fmt.Sprintf("{%s}", strings.Join(parts, " "))
+	switch {
+	case level < 30:
+		return DEBUG
+	case level < 40:
+		return INFO
+	case level < 50:
+		return WARN
 	default:
-		return valueColor.Sprintf("%v", val)
+		return ERROR
 	}
 }
 
-func ParseLog(log string) string {
-	entry := ParseLogEntry(log)
-	return FormatLogEntry(entry)
+func buildStringSet(groups ...[]string) map[string]bool {
+	size := 0
+	for _, group := range groups {
+		size += len(group)
+	}
+
+	set := make(map[string]bool, size)
+	for _, group := range groups {
+		for _, value := range group {
+			set[value] = true
+		}
+	}
+	return set
 }

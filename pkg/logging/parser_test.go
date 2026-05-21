@@ -1,6 +1,9 @@
 package logging
 
 import (
+	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,7 +62,7 @@ func TestParseLogEntry(t *testing.T) {
 					"level": "info",
 					"msg":   "Server started",
 					"time":  "2024-03-15T12:19:57Z",
-					"port":  float64(8080),
+					"port":  json.Number("8080"),
 				},
 			},
 		},
@@ -73,7 +76,7 @@ func TestParseLogEntry(t *testing.T) {
 				Logger:  "zap",
 				Fields: map[string]interface{}{
 					"level":  "error",
-					"ts":     float64(1647340797),
+					"ts":     json.Number("1647340797"),
 					"caller": "api/handler.go:42",
 					"msg":    "Failed to process request",
 					"error":  "invalid input",
@@ -172,6 +175,271 @@ func TestParseLogEntryLogfmt(t *testing.T) {
 	}
 }
 
+func TestParseLogEntryKubernetesTimestampPrefix(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantLevel     LogLevel
+		wantFormat    LogFormat
+		wantMessage   string
+		wantTimestamp string
+	}{
+		{
+			name:          "plain framework log",
+			input:         "2026-05-20T20:37:54.813922141Z   ▲ Next.js 14.2.35",
+			wantLevel:     DEBUG,
+			wantFormat:    FormatPlainText,
+			wantMessage:   "▲ Next.js 14.2.35",
+			wantTimestamp: "2026-05-20T20:37:54Z",
+		},
+		{
+			name:          "json app log keeps pino warn level",
+			input:         `2026-05-20T21:00:07.803821976Z {"level":40,"time":1779310807488,"pid":7,"msg":"Cannot execute the operation on ended Span"}`,
+			wantLevel:     WARN,
+			wantFormat:    FormatJSON,
+			wantMessage:   "Cannot execute the operation on ended Span",
+			wantTimestamp: "2026-05-20T21:00:07Z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseKubernetesLogEntry(tt.input)
+
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if got.Format != tt.wantFormat {
+				t.Errorf("Format = %v, want %v", got.Format, tt.wantFormat)
+			}
+			if got.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", got.Message, tt.wantMessage)
+			}
+			if got.Timestamp.IsZero() {
+				t.Fatal("Timestamp is zero")
+			}
+			if got.Timestamp.UTC().Format(time.RFC3339) != tt.wantTimestamp {
+				t.Errorf("Timestamp = %v, want %s", got.Timestamp.UTC().Format(time.RFC3339), tt.wantTimestamp)
+			}
+		})
+	}
+}
+
+func TestParseLogEntryHTTPStatusLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+	}{
+		{
+			name:      "rails successful request is debug",
+			input:     `{"method":"GET","path":"/status","status":200,"duration":0.49}`,
+			wantLevel: DEBUG,
+		},
+		{
+			name:      "client error request is warn",
+			input:     `{"method":"GET","path":"/missing","status":404,"duration":0.49}`,
+			wantLevel: WARN,
+		},
+		{
+			name:      "server error request is error",
+			input:     `{"method":"GET","path":"/broken","status":500,"duration":0.49}`,
+			wantLevel: ERROR,
+		},
+		{
+			name:      "explicit level wins over status",
+			input:     `{"level":"info","status":500,"msg":"reported upstream status"}`,
+			wantLevel: INFO,
+		},
+		{
+			name:      "domain status without request context is debug",
+			input:     `{"status":500,"message":"background job state"}`,
+			wantLevel: DEBUG,
+		},
+		{
+			name:      "url gives status request context",
+			input:     `{"url":"https://example.test/missing","status":404}`,
+			wantLevel: WARN,
+		},
+		{
+			name:      "otel method gives status request context",
+			input:     `{"http.method":"GET","http.route":"/broken","status":500}`,
+			wantLevel: ERROR,
+		},
+		{
+			name:      "status_code alias with request path",
+			input:     `{"request.path":"/missing","status_code":404}`,
+			wantLevel: WARN,
+		},
+		{
+			name:      "statusCode alias with request method",
+			input:     `{"requestMethod":"POST","statusCode":503}`,
+			wantLevel: ERROR,
+		},
+		{
+			name:      "response status alias with http context",
+			input:     `{"http.method":"GET","response":{"body":"ignored"},"response.status_code":"502"}`,
+			wantLevel: ERROR,
+		},
+		{
+			name:      "nested http status context",
+			input:     `{"http":{"method":"GET","status_code":503},"message":"upstream failed"}`,
+			wantLevel: ERROR,
+		},
+		{
+			name:      "nested response status context",
+			input:     `{"request":{"path":"/missing"},"response":{"status_code":"404"},"message":"not found"}`,
+			wantLevel: WARN,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+		})
+	}
+}
+
+func TestParseLogEntryPlainTextLevelBoundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+	}{
+		{
+			name:      "does not match info inside word",
+			input:     "configuration loaded",
+			wantLevel: DEBUG,
+		},
+		{
+			name:      "does not match error inside word",
+			input:     "ErrorBudget remaining",
+			wantLevel: DEBUG,
+		},
+		{
+			name:      "matches standalone warn",
+			input:     "worker WARN retrying job",
+			wantLevel: WARN,
+		},
+		{
+			name:      "matches bracketed error",
+			input:     "[ERROR] worker failed",
+			wantLevel: ERROR,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+		})
+	}
+}
+
+func TestParseKubernetesLogEntryPrefersKubernetesTimestamp(t *testing.T) {
+	input := `2026-05-20T20:37:54.813922141Z {"level":"info","time":"2026-05-19T10:11:12Z","message":"app timestamp is older"}`
+
+	got := ParseKubernetesLogEntry(input)
+
+	want := "2026-05-20T20:37:54Z"
+	if got.Timestamp.UTC().Format(time.RFC3339) != want {
+		t.Fatalf("Timestamp = %s, want %s", got.Timestamp.UTC().Format(time.RFC3339), want)
+	}
+	if got.Message != "app timestamp is older" {
+		t.Fatalf("Message = %q, want app timestamp message", got.Message)
+	}
+}
+
+func TestParseLogEntryStructuredJSONAliases(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantLevel     LogLevel
+		wantMessage   string
+		wantTimestamp string
+		wantNanos     int
+	}{
+		{
+			name:          "ecs log level alias",
+			input:         `{"log":{"level":"error"},"message":"request failed","timestamp":"2026-05-20T20:37:54Z"}`,
+			wantLevel:     ERROR,
+			wantMessage:   "request failed",
+			wantTimestamp: "2026-05-20T20:37:54Z",
+		},
+		{
+			name:          "otel severity and body aliases",
+			input:         `{"severityText":"WARN","body":"span ended","time":"1789840674123"}`,
+			wantLevel:     WARN,
+			wantMessage:   "span ended",
+			wantTimestamp: "2026-09-19T17:57:54Z",
+		},
+		{
+			name:          "numeric timestamp string with whitespace",
+			input:         `{"level":"info","message":"started","ts":" 1789840674123 "}`,
+			wantLevel:     INFO,
+			wantMessage:   "started",
+			wantTimestamp: "2026-09-19T17:57:54Z",
+		},
+		{
+			name:          "nanosecond timestamp number preserves scale",
+			input:         `{"level":40.0,"message":"precise","ts":1789840674123000000}`,
+			wantLevel:     WARN,
+			wantMessage:   "precise",
+			wantTimestamp: "2026-09-19T17:57:54Z",
+			wantNanos:     123000000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if got.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", got.Message, tt.wantMessage)
+			}
+			if got.Timestamp.UTC().Format(time.RFC3339) != tt.wantTimestamp {
+				t.Errorf("Timestamp = %s, want %s", got.Timestamp.UTC().Format(time.RFC3339), tt.wantTimestamp)
+			}
+			if tt.wantNanos != 0 && got.Timestamp.UTC().Nanosecond() != tt.wantNanos {
+				t.Errorf("Timestamp nanoseconds = %d, want %d", got.Timestamp.UTC().Nanosecond(), tt.wantNanos)
+			}
+		})
+	}
+}
+
+func TestFilterAndFormatLogsUsesSharedFormatter(t *testing.T) {
+	input := strings.NewReader(`{"level":"info","time":"2026-05-20T20:37:54Z","message":"started","component":"api"}` + "\n")
+	var buf bytes.Buffer
+
+	if err := FilterAndFormatLogs(input, &buf, INFO); err != nil {
+		t.Fatalf("FilterAndFormatLogs() error = %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "[2026-05-20 20:37:54] [INFO]") || !strings.Contains(got, "started") || !strings.Contains(got, "component=api") {
+		t.Fatalf("FilterAndFormatLogs output did not use shared formatter: %q", got)
+	}
+}
+
+func TestFilterAndFormatLogsAcceptsLongLines(t *testing.T) {
+	input := strings.NewReader(`{"level":"info","message":"` + strings.Repeat("x", 70*1024) + `"}` + "\n")
+	var buf bytes.Buffer
+
+	if err := FilterAndFormatLogs(input, &buf, INFO); err != nil {
+		t.Fatalf("FilterAndFormatLogs() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), strings.Repeat("x", 1024)) {
+		t.Fatal("FilterAndFormatLogs output missing long message content")
+	}
+}
+
 func TestParseLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -186,10 +454,17 @@ func TestParseLogLevel(t *testing.T) {
 		{"error level", "ERROR", ERROR, false},
 		{"lowercase level", "debug", DEBUG, false},
 		{"mixed case level", "InFo", INFO, false},
-		{"numeric debug level", "10", DEBUG, false},
-		{"numeric info level", "20", INFO, false},
-		{"numeric warn level", "30", WARN, false},
-		{"numeric error level", "40", ERROR, false},
+		{"level with whitespace", " WARN ", WARN, false},
+		{"numeric float string level", "40.0", WARN, false},
+		{"zap numeric debug level", "-1", DEBUG, false},
+		{"zap numeric info level", "0", INFO, false},
+		{"zap numeric warn level", "1", WARN, false},
+		{"zap numeric error level", "2", ERROR, false},
+		{"pino numeric trace level", "10", DEBUG, false},
+		{"pino numeric debug level", "20", DEBUG, false},
+		{"pino numeric info level", "30", INFO, false},
+		{"pino numeric warn level", "40", WARN, false},
+		{"pino numeric error level", "50", ERROR, false},
 		{"invalid level", "INVALID", DEBUG, true},
 	}
 
@@ -242,15 +517,15 @@ func TestDetectLogger(t *testing.T) {
 			input: map[string]interface{}{
 				"custom": "field",
 			},
-			expected: "unknown",
+			expected: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := detectLogger(tt.input)
+			got := detectLoggerLabel(tt.input)
 			if got != tt.expected {
-				t.Errorf("detectLogger() = %v, want %v", got, tt.expected)
+				t.Errorf("detectLoggerLabel() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
@@ -363,5 +638,54 @@ func TestParseTimestamp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseUnixTimestampScales(t *testing.T) {
+	want := time.Date(2026, 5, 20, 20, 37, 54, 123000000, time.UTC)
+	tests := []struct {
+		name      string
+		input     float64
+		tolerance time.Duration
+	}{
+		{"seconds", float64(want.Unix()), 0},
+		{"milliseconds", float64(want.UnixMilli()), 0},
+		{"microseconds", float64(want.UnixMicro()), 0},
+		{"nanoseconds", float64(want.UnixNano()), time.Microsecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseUnixTimestamp(tt.input).UTC()
+			if tt.name == "seconds" {
+				wantSeconds := want.Truncate(time.Second)
+				if !got.Equal(wantSeconds) {
+					t.Fatalf("parseUnixTimestamp() = %s, want %s", got, wantSeconds)
+				}
+				return
+			}
+			if tt.tolerance == 0 && !got.Equal(want) {
+				t.Fatalf("parseUnixTimestamp() = %s, want %s", got, want)
+			}
+			if tt.tolerance > 0 && got.Sub(want).Abs() > tt.tolerance {
+				t.Fatalf("parseUnixTimestamp() = %s, want within %s of %s", got, tt.tolerance, want)
+			}
+		})
+	}
+}
+
+func assertInOrder(t *testing.T, got string, expected []string) {
+	t.Helper()
+
+	lastIndex := -1
+	for _, value := range expected {
+		index := strings.Index(got, value)
+		if index == -1 {
+			t.Fatalf("output missing %q: %q", value, got)
+		}
+		if index < lastIndex {
+			t.Fatalf("output has %q out of order: %q", value, got)
+		}
+		lastIndex = index
 	}
 }
