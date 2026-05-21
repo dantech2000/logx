@@ -1,0 +1,61 @@
+apiVersion: v1
+items:
+- apiVersion: v1
+  count: 37923
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:41:59Z"
+  involvedObject:
+    apiVersion: v1
+    fieldPath: spec.containers{sample-imagepull-app}
+    kind: Pod
+    name: sample-imagepull-app-59dd994c59-bhtlt
+    namespace: sample-imagepull-app
+    resourceVersion: "975113226"
+    uid: 00000000-0000-4000-8000-000000000003
+  kind: Event
+  lastTimestamp: "2026-05-20T23:42:03Z"
+  message: Back-off pulling image "000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag"
+  metadata:
+    creationTimestamp: "2026-05-15T00:41:59Z"
+    name: sample-imagepull-app-59dd994c59-bhtlt.18af9660b20bbfcd
+    namespace: sample-imagepull-app
+    resourceVersion: "979750714"
+    uid: 00000000-0000-4000-8000-000000000004
+  reason: BackOff
+  reportingComponent: kubelet
+  reportingInstance: node-1.example.internal
+  source:
+    component: kubelet
+    host: node-1.example.internal
+  type: Normal
+- apiVersion: v1
+  count: 37923
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:41:59Z"
+  involvedObject:
+    apiVersion: v1
+    fieldPath: spec.containers{sample-imagepull-app}
+    kind: Pod
+    name: sample-imagepull-app-59dd994c59-bhtlt
+    namespace: sample-imagepull-app
+    resourceVersion: "975113226"
+    uid: 00000000-0000-4000-8000-000000000003
+  kind: Event
+  lastTimestamp: "2026-05-20T23:42:03Z"
+  message: 'Error: ImagePullBackOff'
+  metadata:
+    creationTimestamp: "2026-05-15T00:41:59Z"
+    name: sample-imagepull-app-59dd994c59-bhtlt.18af9660b2291c6c
+    namespace: sample-imagepull-app
+    resourceVersion: "979750715"
+    uid: 00000000-0000-4000-8000-000000000005
+  reason: Failed
+  reportingComponent: kubelet
+  reportingInstance: node-1.example.internal
+  source:
+    component: kubelet
+    host: node-1.example.internal
+  type: Warning
+kind: List
+metadata:
+  resourceVersion: ""

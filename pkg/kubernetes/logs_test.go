@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -423,6 +424,7 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 		testPodEvent("test-pod", "Normal", "Scheduled", "Successfully assigned default/test-pod", "2026-05-15T00:38:01Z"),
 		testPodEvent("test-pod", "Warning", "Unhealthy", "Readiness probe failed", "2026-05-15T00:38:03Z"),
 		testPodEvent("other-pod", "Warning", "BackOff", "Back-off restarting failed container", "2026-05-15T00:38:00Z"),
+		testEvent("targetgroupbinding", "k8s-sample-edge-04b4cdfbf4", "Normal", "SuccessfullyReconciled", "Successfully reconciled", "2026-05-15T00:38:05Z"),
 	}
 	for _, event := range events {
 		if _, err := clientset.CoreV1().Events("default").Create(context.Background(), event, metav1.CreateOptions{}); err != nil {
@@ -441,14 +443,13 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 
 	got := buf.String()
 	assertInOrder(t, got, []string{
-		"[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/test-pod",
-		"[2026-05-15 00:38:02] [LOG] [INFO] 2026-05-15T00:38:02Z INFO application started",
-		"[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed",
-		"[2026-05-15 00:38:04] [LOG] [ERROR] 2026-05-15T00:38:04Z ERROR request failed",
+		"[2026-05-15 00:38:00] [EVENT] [Warning] pod/other-pod BackOff: Back-off restarting failed container",
+		"[2026-05-15 00:38:01] [EVENT] [Normal] pod/test-pod Scheduled: Successfully assigned default/test-pod",
+		"[2026-05-15 00:38:02] [LOG] [INFO] INFO application started",
+		"[2026-05-15 00:38:03] [EVENT] [Warning] pod/test-pod Unhealthy: Readiness probe failed",
+		"[2026-05-15 00:38:04] [LOG] [ERROR] ERROR request failed",
+		"[2026-05-15 00:38:05] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-04b4cdfbf4 SuccessfullyReconciled: Successfully reconciled",
 	})
-	if strings.Contains(got, "other-pod") || strings.Contains(got, "BackOff") {
-		t.Fatalf("GetTimeline() included event for another pod: %q", got)
-	}
 }
 
 func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
@@ -486,6 +487,175 @@ func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
+func TestLogFetcher_GetTimelineIncludesRealNamespaceEvents(t *testing.T) {
+	logs, err := os.ReadFile("testdata/real-traefik/logs.txt")
+	if err != nil {
+		t.Fatalf("read real timeline logs fixture: %v", err)
+	}
+
+	pod := readPodFixture(t, "testdata/real-traefik/pod.yaml")
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: logs}, nil
+	})
+	for _, event := range readEventListFixture(t, "testdata/real-traefik/events.yaml").Items {
+		event := event
+		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, pod.Namespace, pod.Name, false, false, &buf)
+	fetcher.ContainerName = "sample-proxy"
+	fetcher.FilterLevel = logging.WARN
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	assertInOrder(t, got, []string{
+		"[2026-05-15 00:38:04] [LOG] [WARN] Traefik can reject some encoded characters",
+		"[2026-05-15 00:38:05] [LOG] [WARN] Cross-namespace reference between IngressRoutes and resources is enabled",
+		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-04b4cdfbf4 SuccessfullyReconciled: Successfully reconciled",
+		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-1574c2ae0f SuccessfullyReconciled: Successfully reconciled",
+		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-4cf5e6a381 SuccessfullyReconciled: Successfully reconciled",
+		"[2026-05-20 21:50:05] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-9747be237f SuccessfullyReconciled: Successfully reconciled",
+	})
+
+	if count := strings.Count(got, "[EVENT] [Normal] targetgroupbinding/"); count != 4 {
+		t.Fatalf("timeline targetgroupbinding event count = %d, want 4: %q", count, got)
+	}
+}
+
+func TestLogFetcher_GetTimelineOrdersRealPlainFrameworkLogs(t *testing.T) {
+	logs, err := os.ReadFile("testdata/real-portal/logs.txt")
+	if err != nil {
+		t.Fatalf("read real portal logs fixture: %v", err)
+	}
+
+	pod := readPodFixture(t, "testdata/real-portal/pod.yaml")
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: logs}, nil
+	})
+	for _, event := range readEventListFixture(t, "testdata/real-portal/events.yaml").Items {
+		event := event
+		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, pod.Namespace, pod.Name, false, false, &buf)
+	fetcher.ContainerName = "web"
+	fetcher.FilterLevel = logging.DEBUG
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	assertInOrder(t, got, []string{
+		"[2026-05-20 20:37:54] [LOG] [DEBUG] ▲ Next.js 14.2.35",
+		"[2026-05-20 20:37:54] [LOG] [DEBUG] - Local:        http://localhost:3100",
+		"[2026-05-20 20:38:03] [LOG] [DEBUG] ✓ Ready in 9.9s",
+		"[2026-05-20 20:38:05] [LOG] [INFO] [statsig] running in k8s, using forward proxy",
+		"[2026-05-20 21:00:07] [LOG] [WARN] Cannot execute the operation on ended Span",
+	})
+	if strings.Contains(got, "[no timestamp]") {
+		t.Fatalf("timeline output contains no-timestamp log lines: %q", got)
+	}
+}
+
+func TestLogFetcher_GetTimelineParsesRealRailsLogs(t *testing.T) {
+	logs, err := os.ReadFile("testdata/real-rails/logs.txt")
+	if err != nil {
+		t.Fatalf("read real rails logs fixture: %v", err)
+	}
+
+	pod := readPodFixture(t, "testdata/real-rails/pod.yaml")
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: logs}, nil
+	})
+	for _, event := range readEventListFixture(t, "testdata/real-rails/events.yaml").Items {
+		event := event
+		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, pod.Namespace, pod.Name, false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.DEBUG
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	assertInOrder(t, got, []string{
+		"[2026-05-20 13:26:38] [LOG] [WARN] Warning: You specified code to run in a `on_worker_boot` block",
+		"[2026-05-20 13:27:22] [LOG] [DEBUG] Instrumentation: OpenTelemetry::Instrumentation::Mongo failed to install",
+		"[2026-05-20 13:27:46] [LOG] [DEBUG]",
+		"[2026-05-20 16:29:11] [LOG] [DEBUG] Failed to GeoIP the ip_address . (invalid address: )",
+	})
+	if strings.Contains(got, "[no timestamp]") {
+		t.Fatalf("timeline output contains no-timestamp log lines: %q", got)
+	}
+	if strings.Contains(got, "[LOG] [ERROR]") {
+		t.Fatalf("timeline classified successful Rails request logs as errors: %q", got)
+	}
+	if !strings.Contains(got, "controller=") || !strings.Contains(got, "status=200") {
+		t.Fatalf("timeline did not format Rails JSON request fields: %q", got)
+	}
+}
+
+func TestLogFetcher_GetTimelineShowsEventsWhenLogsUnavailable(t *testing.T) {
+	pod := readPodFixture(t, "testdata/real-imagepull/pod.yaml")
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("container %q in pod %q is waiting to start: trying and failing to pull image", "sample-imagepull-app", pod.Name)
+	})
+	for _, event := range readEventListFixture(t, "testdata/real-imagepull/events.yaml").Items {
+		event := event
+		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, pod.Namespace, pod.Name, false, false, &buf)
+	fetcher.ContainerName = "sample-imagepull-app"
+	fetcher.FilterLevel = logging.DEBUG
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	assertInOrder(t, got, []string{
+		"[2026-05-20 23:42:03] [EVENT] [Normal] pod/sample-imagepull-app-59dd994c59-bhtlt BackOff: Back-off pulling image",
+		"[2026-05-20 23:42:03] [EVENT] [Warning] pod/sample-imagepull-app-59dd994c59-bhtlt Failed: Error: ImagePullBackOff",
+	})
+	if strings.Contains(got, "[LOG]") {
+		t.Fatalf("timeline output contains log entries even though logs were unavailable: %q", got)
+	}
+}
+
+func TestFormatTimelineEventHandlesUnknownType(t *testing.T) {
+	event := newTimelineEvent(*testEvent("Pod", "test-pod", "Critical", "NodePressure", "node is under pressure", "2026-05-15T00:38:07Z"))
+
+	got := formatTimelineEvent(event)
+	want := "[2026-05-15 00:38:07] [EVENT] [Critical] pod/test-pod NodePressure: node is under pressure"
+	if got != want {
+		t.Fatalf("formatTimelineEvent() = %q, want %q", got, want)
+	}
+}
+
 func readEventListFixture(t *testing.T, path string) *corev1.EventList {
 	t.Helper()
 
@@ -506,18 +676,22 @@ func readEventListFixture(t *testing.T, path string) *corev1.EventList {
 }
 
 func testPodEvent(podName, eventType, reason, message, timestamp string) *corev1.Event {
+	return testEvent("Pod", podName, eventType, reason, message, timestamp)
+}
+
+func testEvent(kind, name, eventType, reason, message, timestamp string) *corev1.Event {
 	ts, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		panic(err)
 	}
 	return &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName + "." + reason,
+			Name:      name + "." + reason,
 			Namespace: "default",
 		},
 		InvolvedObject: corev1.ObjectReference{
-			Kind:      "Pod",
-			Name:      podName,
+			Kind:      kind,
+			Name:      name,
 			Namespace: "default",
 		},
 		Type:           eventType,
@@ -660,7 +834,7 @@ func TestLogWriter_Write(t *testing.T) {
 		{
 			name:     "JSON log",
 			input:    `{"level":"info","ts":"2024-03-15T12:19:57Z","msg":"test message"}`,
-			wantLogs: "[2024-03-15 12:19:57] [INFO] [logrus] test message ts=2024-03-15T12:19:57Z\n",
+			wantLogs: "[2024-03-15 12:19:57] [INFO] [logrus] test message\n",
 		},
 		{
 			name:     "Empty log line",

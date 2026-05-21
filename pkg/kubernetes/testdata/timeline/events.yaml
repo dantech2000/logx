@@ -46,6 +46,6 @@ items:
       namespace: default
     type: Warning
     reason: Unhealthy
-    message: This event should not appear in the single-container-pod timeline
+    message: Namespace event for another pod
     firstTimestamp: "2026-05-15T00:38:00Z"
     lastTimestamp: "2026-05-15T00:38:00Z"

@@ -1,0 +1,109 @@
+apiVersion: v1
+items:
+- apiVersion: v1
+  count: 32
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:40:56Z"
+  involvedObject:
+    apiVersion: elbv2.k8s.aws/v1beta1
+    kind: TargetGroupBinding
+    name: k8s-sample-edge-04b4cdfbf4
+    namespace: sample-edge
+    resourceVersion: "914530200"
+    uid: 76ef702b-0368-4cab-a1f1-fd72b8d4e3b1
+  kind: Event
+  lastTimestamp: "2026-05-20T21:50:04Z"
+  message: Successfully reconciled
+  metadata:
+    creationTimestamp: "2026-05-20T21:50:04Z"
+    name: k8s-sample-edge-04b4cdfbf4.18af9651d4eb480b
+    namespace: sample-edge
+    resourceVersion: "979691217"
+    uid: 87b3b31c-d2c3-4a06-931e-bd9c8937e950
+  reason: SuccessfullyReconciled
+  reportingComponent: ""
+  reportingInstance: ""
+  source:
+    component: targetGroupBinding
+  type: Normal
+- apiVersion: v1
+  count: 32
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:40:56Z"
+  involvedObject:
+    apiVersion: elbv2.k8s.aws/v1beta1
+    kind: TargetGroupBinding
+    name: k8s-sample-edge-1574c2ae0f
+    namespace: sample-edge
+    resourceVersion: "914530195"
+    uid: 9fb35af5-cdc1-4fb5-b453-f71911fa2c67
+  kind: Event
+  lastTimestamp: "2026-05-20T21:50:04Z"
+  message: Successfully reconciled
+  metadata:
+    creationTimestamp: "2026-05-20T21:50:05Z"
+    name: k8s-sample-edge-1574c2ae0f.18af9651e0c1e16e
+    namespace: sample-edge
+    resourceVersion: "979691219"
+    uid: 2f94a948-55a7-4e48-89fa-a43502915e07
+  reason: SuccessfullyReconciled
+  reportingComponent: ""
+  reportingInstance: ""
+  source:
+    component: targetGroupBinding
+  type: Normal
+- apiVersion: v1
+  count: 33
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:40:56Z"
+  involvedObject:
+    apiVersion: elbv2.k8s.aws/v1beta1
+    kind: TargetGroupBinding
+    name: k8s-sample-edge-4cf5e6a381
+    namespace: sample-edge
+    resourceVersion: "914530192"
+    uid: 155a5f08-17fa-4164-b8ac-397a9c897baf
+  kind: Event
+  lastTimestamp: "2026-05-20T21:50:04Z"
+  message: Successfully reconciled
+  metadata:
+    creationTimestamp: "2026-05-20T21:50:04Z"
+    name: k8s-sample-edge-4cf5e6a381.18af9651e0d3f3bb
+    namespace: sample-edge
+    resourceVersion: "979691216"
+    uid: 68a37e64-fd31-444a-842a-df2daeae33ba
+  reason: SuccessfullyReconciled
+  reportingComponent: ""
+  reportingInstance: ""
+  source:
+    component: targetGroupBinding
+  type: Normal
+- apiVersion: v1
+  count: 33
+  eventTime: null
+  firstTimestamp: "2026-05-15T00:40:57Z"
+  involvedObject:
+    apiVersion: elbv2.k8s.aws/v1beta1
+    kind: TargetGroupBinding
+    name: k8s-sample-edge-9747be237f
+    namespace: sample-edge
+    resourceVersion: "914530221"
+    uid: e8bded88-0138-4af9-80fd-184e2a4b3a8f
+  kind: Event
+  lastTimestamp: "2026-05-20T21:50:05Z"
+  message: Successfully reconciled
+  metadata:
+    creationTimestamp: "2026-05-20T21:50:05Z"
+    name: k8s-sample-edge-9747be237f.18af96521dce4262
+    namespace: sample-edge
+    resourceVersion: "979691220"
+    uid: 75e18255-0ba3-4ee2-b073-257a77c77a60
+  reason: SuccessfullyReconciled
+  reportingComponent: ""
+  reportingInstance: ""
+  source:
+    component: targetGroupBinding
+  type: Normal
+kind: List
+metadata:
+  resourceVersion: ""

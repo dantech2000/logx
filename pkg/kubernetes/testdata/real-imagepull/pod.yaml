@@ -1,0 +1,210 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2026-05-15T00:41:58Z"
+  generateName: sample-imagepull-app-59dd994c59-
+  generation: 1
+  labels:
+    app.kubernetes.io/instance: sample-imagepull-app
+    app.kubernetes.io/name: sample-imagepull-app
+    pod-template-hash: 59dd994c59
+    tags.datadoghq.com/env: development
+    tags.datadoghq.com/service: sample-imagepull-app
+    tags.datadoghq.com/version: 60fa929fd5eb747f4be8bcc23eaeaefbd62dcee9
+  name: sample-imagepull-app-59dd994c59-bhtlt
+  namespace: sample-imagepull-app
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: ReplicaSet
+    name: sample-imagepull-app-59dd994c59
+    uid: 9c2071c1-4b04-4f69-8b57-b29f8bc7259d
+  resourceVersion: "979750513"
+  uid: 00000000-0000-4000-8000-000000000003
+spec:
+  containers:
+  - env:
+    - name: DD_ENABLED
+      value: "true"
+    - name: DD__ENV
+      value: develop
+    - name: DD__SERVICE
+      value: sample-imagepull-app
+    - name: DD__VERSION
+      value: 1.0.0
+    - name: DD_AGENT_HOST
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: status.hostIP
+    - name: DD_ENV
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.labels['tags.datadoghq.com/env']
+    - name: DD_SERVICE
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.labels['tags.datadoghq.com/service']
+    - name: DD_VERSION
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.labels['tags.datadoghq.com/version']
+    image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag
+    imagePullPolicy: Always
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /business/account/api/status
+        port: 3101
+        scheme: HTTP
+      initialDelaySeconds: 3
+      periodSeconds: 3
+      successThreshold: 1
+      timeoutSeconds: 1
+    name: sample-imagepull-app
+    ports:
+    - containerPort: 3101
+      name: http
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /business/account/api/status
+        port: 3101
+        scheme: HTTP
+      initialDelaySeconds: 3
+      periodSeconds: 3
+      successThreshold: 1
+      timeoutSeconds: 1
+    resources:
+      limits:
+        cpu: 250m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 100Mi
+    securityContext:
+      readOnlyRootFilesystem: false
+      runAsNonRoot: true
+      runAsUser: 1000
+    startupProbe:
+      failureThreshold: 30
+      httpGet:
+        path: /business/account/api/status
+        port: 3101
+        scheme: HTTP
+      periodSeconds: 10
+      successThreshold: 1
+      timeoutSeconds: 1
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-hmd8j
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: node-1.example.internal
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: default
+  serviceAccountName: default
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: kube-api-access-hmd8j
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-15T00:41:59Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-15T00:41:58Z"
+    observedGeneration: 1
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-15T00:41:58Z"
+    message: 'containers with unready status: [sample-imagepull-app]'
+    observedGeneration: 1
+    reason: ContainersNotReady
+    status: "False"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-15T00:41:58Z"
+    message: 'containers with unready status: [sample-imagepull-app]'
+    observedGeneration: 1
+    reason: ContainersNotReady
+    status: "False"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-15T00:41:58Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag
+    imageID: ""
+    lastState: {}
+    name: sample-imagepull-app
+    ready: false
+    restartCount: 0
+    started: false
+    state:
+      waiting:
+        message: 'Back-off pulling image "000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag":
+          ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack
+          image "000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag":
+          failed to resolve reference "000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag":
+          000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-imagepull-app:missing-tag:
+          not found'
+        reason: ImagePullBackOff
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-hmd8j
+      readOnly: true
+      recursiveReadOnly: Disabled
+  hostIP: 192.0.2.45
+  hostIPs:
+  - ip: 192.0.2.45
+  observedGeneration: 1
+  phase: Pending
+  podIP: 192.0.2.10
+  podIPs:
+  - ip: 192.0.2.10
+  qosClass: Burstable
+  startTime: "2026-05-15T00:41:58Z"

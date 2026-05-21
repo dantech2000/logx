@@ -1,0 +1,321 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kubectl.kubernetes.io/restartedAt: "2024-03-27T18:29:42+05:30"
+    rollme: ioBiy
+  creationTimestamp: "2026-05-20T13:26:33Z"
+  generateName: sample-rails-app-7d7b9c784f-
+  generation: 1
+  labels:
+    app.kubernetes.io/instance: sample-rails
+    app.kubernetes.io/name: app
+    environment: development
+    pod-template-hash: 7d7b9c784f
+    service: sample-rails
+    tags.datadoghq.com/env: development
+    tags.datadoghq.com/service: sample-rails
+    tags.datadoghq.com/version: 9d67ac493e0b4e28cfe62bcb6ada0ef6e298c327
+    version: 9d67ac493e0b4e28cfe62bcb6ada0ef6e298c327
+  name: sample-rails-app-7d7b9c784f-2c46h
+  namespace: sample-rails
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: ReplicaSet
+    name: sample-rails-app-7d7b9c784f
+    uid: e5a36dba-d8a5-473b-99ff-10ae56248a3f
+  resourceVersion: "979420977"
+  uid: 1c5b5f1f-f927-4012-a042-7e84bc0bda12
+spec:
+  containers:
+  - env:
+    - name: OTEL_AGENT_HOST
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: status.hostIP
+    - name: OTEL_ENV
+      value: development
+    - name: OTEL_SERVICE
+      value: sample-rails
+    - name: OTEL_SERVICE_NAME
+      value: sample-rails
+    - name: OTEL_VERSION
+      value: 9d67ac493e0b4e28cfe62bcb6ada0ef6e298c327
+    - name: OTEL_POD_NAME
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.name
+    - name: OTEL_NAMESPACE
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.namespace
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: k8s.namespace.name=$(OTEL_NAMESPACE),deployment.environment=$(OTEL_ENV),service.version=$(OTEL_VERSION),k8s.pod.name=$(OTEL_POD_NAME)
+    - name: ANALYTICS_REPORTING_SERVICE_URL
+      value: https://service.example.local/
+    - name: CONTAINER_API_BASE
+      value: staging-propeller.cc-le-cf.com
+    - name: CONTAINER_API_PROXY_DOMAIN
+      value: cc-staging-propeller.cloud
+    - name: CONTAINER_API_USE_SSL
+      value: "true"
+    - name: CONTENTV4_GRAPHQL_URL
+      value: https://service.example.local/
+    - name: DWH_REPORTING_SERVICE_URL
+      value: https://service.example.local/
+    - name: GC_PROFILER_ENABLE
+      value: "1"
+    - name: GRAPHQL_GATEWAY_BACKEND_URL
+      value: https://service.example.local/
+    - name: KAFKA_BROKERS
+      value: events-bus.example.local:9094,events-bus.example.local:9094,events-bus.example.local:9094
+    - name: KAFKA_SECURITY
+      value: ssl
+    - name: LOG_LEVEL
+      value: debug
+    - name: MEMCACHE_SERVERS
+      value: memcached:11211
+    - name: MONGO_DB_NAME
+      value: sample_rs_staging
+    - name: OPENID_CONNECT_ISSUER
+      value: https://sample-rails.example.local
+    - name: OTEL_ENABLED
+      value: "true"
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: http://$(OTEL_AGENT_HOST):4318
+    - name: OTEL_PROPAGATORS
+      value: tracecontext,baggage,b3
+    - name: OTEL_TRACES_SAMPLER
+      value: always_on
+    - name: PBS_BASE_URL
+      value: service.example.local
+    - name: PUMA_THREAD_POOL_SIZE
+      value: "5"
+    - name: QUOTE_TEMPLATE_API_BASE
+      value: https://service.example.local/
+    - name: RACK_ENV
+      value: dev
+    - name: RAILS_ENV
+      value: dev
+    - name: RECURLY_SUBDOMAIN
+      value: sample-test
+    - name: REDIS_HOST
+      value: sample-redis.example.local
+    - name: STATSD_ADDR
+      value: $(OTEL_AGENT_HOST):8125
+    - name: STATSD_DEFAULT_TAGS
+      value: deployment.environment:$(OTEL_ENV),service.name:$(OTEL_SERVICE),service.version:$(OTEL_VERSION),k8s.namespace.name:$(OTEL_NAMESPACE),k8s.pod.name:$(OTEL_POD_NAME)
+    - name: STATSD_ENV
+      value: staging
+    - name: WEBPACK_MANIFEST_HOST
+      value: sample-react
+    - name: WEB_CONCURRENCY
+      value: "0"
+    - name: AWS_STS_REGIONAL_ENDPOINTS
+      value: regional
+    - name: AWS_DEFAULT_REGION
+      value: us-east-1
+    - name: AWS_REGION
+      value: us-east-1
+    - name: AWS_ROLE_ARN
+      value: arn:aws:iam::000000000000:role/sample_rails_role
+    - name: AWS_WEB_IDENTITY_TOKEN_FILE
+      value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+    envFrom:
+    - secretRef:
+        name: tokenlist
+    image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-rails:sample-version
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /status
+        port: http
+        scheme: HTTP
+      periodSeconds: 30
+      successThreshold: 1
+      timeoutSeconds: 3
+    name: app
+    ports:
+    - containerPort: 3000
+      name: http
+      protocol: TCP
+    - containerPort: 9293
+      name: puma
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /status
+        port: http
+        scheme: HTTP
+      periodSeconds: 10
+      successThreshold: 1
+      timeoutSeconds: 3
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1500Mi
+      requests:
+        cpu: 100m
+        memory: 1000Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+    startupProbe:
+      failureThreshold: 30
+      httpGet:
+        path: /members
+        port: http
+        scheme: HTTP
+      periodSeconds: 10
+      successThreshold: 1
+      timeoutSeconds: 3
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /usr/share/GeoIP
+      name: efs-app
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-jhcs5
+      readOnly: true
+    - mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+      name: aws-iam-token
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: node-1.example.internal
+  nodeSelector:
+    dedicated: sample-rails
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: sample-service-account
+  serviceAccountName: sample-service-account
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoSchedule
+    key: dedicated
+    operator: Equal
+    value: sample-rails
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: aws-iam-token
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          audience: sts.amazonaws.com
+          expirationSeconds: 86400
+          path: token
+  - name: efs-app
+    persistentVolumeClaim:
+      claimName: efs-sample-rails
+  - name: kube-api-access-jhcs5
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-20T13:26:36Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-20T13:26:33Z"
+    observedGeneration: 1
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-20T13:27:46Z"
+    observedGeneration: 1
+    status: "True"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-20T13:27:46Z"
+    observedGeneration: 1
+    status: "True"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2026-05-20T13:26:33Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - allocatedResources:
+      cpu: 100m
+      memory: 1000Mi
+    containerID: containerd://0000000000000000000000000000000000000000000000000000000000000000
+    image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-rails:sample-version
+    imageID: 000000000000.dkr.ecr.us-east-1.amazonaws.com/example/sample-rails@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    lastState: {}
+    name: app
+    ready: true
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1500Mi
+      requests:
+        cpu: 100m
+        memory: 1000Mi
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2026-05-20T13:26:35Z"
+    user:
+      linux:
+        gid: 1001
+        supplementalGroups:
+        - 1001
+        uid: 1001
+    volumeMounts:
+    - mountPath: /usr/share/GeoIP
+      name: efs-app
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-jhcs5
+      readOnly: true
+      recursiveReadOnly: Disabled
+    - mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+      name: aws-iam-token
+      readOnly: true
+      recursiveReadOnly: Disabled
+  hostIP: 192.0.2.10
+  hostIPs:
+  - ip: 192.0.2.10
+  observedGeneration: 1
+  phase: Running
+  podIP: 192.0.2.10
+  podIPs:
+  - ip: 192.0.2.10
+  qosClass: Burstable
+  startTime: "2026-05-20T13:26:33Z"

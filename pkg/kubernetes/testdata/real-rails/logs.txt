@@ -1,0 +1,57 @@
+2026-05-20T13:26:38.326891302Z Warning: You specified code to run in a `on_worker_boot` block, but Puma is not configured to run in cluster mode (worker count > 0 ), so your `on_worker_boot` block did not run
+2026-05-20T13:26:38.372263496Z Puma starting in single mode...
+2026-05-20T13:26:38.372288037Z * Puma version: 6.4.3 (ruby 3.3.6-p108) ("The Eagle of Durango")
+2026-05-20T13:26:38.372293107Z *  Min threads: 5
+2026-05-20T13:26:38.372297597Z *  Max threads: 5
+2026-05-20T13:26:38.372301677Z *  Environment: dev
+2026-05-20T13:26:38.372305457Z *          PID: 1
+2026-05-20T13:27:16.503477059Z Overwriting existing field resource_owner_id in class Doorkeeper::AccessGrant.
+2026-05-20T13:27:16.507811841Z Overwriting existing field resource_owner_type in class Doorkeeper::AccessGrant.
+2026-05-20T13:27:16.523721752Z Overwriting existing field resource_owner_id in class Doorkeeper::AccessToken.
+2026-05-20T13:27:16.571852677Z Overwriting existing field resource_owner_type in class Doorkeeper::AccessToken.
+2026-05-20T13:27:16.611062226Z RedisConfig: calling redis_client_from_uri with uri: redis://sample-redis.example.local/0
+2026-05-20T13:27:16.612562054Z Using Statsig environment: preview
+2026-05-20T13:27:19.832083970Z Instrumentation: OpenTelemetry::Instrumentation::ActiveSupport was successfully installed with the following options {}
+2026-05-20T13:27:19.874597789Z Instrumentation: OpenTelemetry::Instrumentation::Rack was successfully installed with the following options {:allowed_request_headers=>[], :allowed_response_headers=>[], :application=>nil, :record_frontend_span=>false, :untraced_endpoints=>[], :url_quantization=>nil, :untraced_requests=>nil, :response_propagators=>[], :use_rack_events=>true, :allowed_rack_request_headers=>{}, :allowed_rack_response_headers=>{}}
+2026-05-20T13:27:19.876583583Z Instrumentation: OpenTelemetry::Instrumentation::ActionPack was successfully installed with the following options {:span_naming=>:semconv}
+2026-05-20T13:27:19.881240898Z Instrumentation: OpenTelemetry::Instrumentation::ActiveJob was successfully installed with the following options {:propagation_style=>:link, :force_flush=>false, :span_naming=>:queue}
+2026-05-20T13:27:19.882072328Z Instrumentation: OpenTelemetry::Instrumentation::ActionView was successfully installed with the following options {:disallowed_notification_payload_keys=>[], :notification_payload_transform=>nil, :legacy_span_names=>false}
+2026-05-20T13:27:19.882911138Z Instrumentation: OpenTelemetry::Instrumentation::ActionMailer was successfully installed with the following options {:disallowed_notification_payload_keys=>["email.to.address", "email.from.address", "email.cc.address", "email.bcc.address"], :disallowed_process_payload_keys=>[], :notification_payload_transform=>#<Proc:0x00007fefd5e13968 /bundle/vendor/ruby/3.3.0/gems/opentelemetry-instrumentation-action_mailer-0.4.0/lib/opentelemetry/instrumentation/action_mailer/instrumentation.rb:95 (lambda)>, :process_payload_transform=>nil, :email_address=>:omit}
+2026-05-20T13:27:22.181191146Z Instrumentation: OpenTelemetry::Instrumentation::AwsSdk was successfully installed with the following options {:inject_messaging_context=>false, :suppress_internal_instrumentation=>false}
+2026-05-20T13:27:22.183689266Z Instrumentation: OpenTelemetry::Instrumentation::HTTP was successfully installed with the following options {:span_name_formatter=>nil}
+2026-05-20T13:27:22.184515876Z Instrumentation: OpenTelemetry::Instrumentation::ConcurrentRuby was successfully installed with the following options {}
+2026-05-20T13:27:22.186267227Z Instrumentation: OpenTelemetry::Instrumentation::Dalli was successfully installed with the following options {:peer_service=>nil, :db_statement=>:obfuscate}
+2026-05-20T13:27:22.188356101Z Instrumentation: OpenTelemetry::Instrumentation::Ethon was successfully installed with the following options {:peer_service=>nil}
+2026-05-20T13:27:22.205938111Z Instrumentation: OpenTelemetry::Instrumentation::Faraday was successfully installed with the following options {:span_kind=>:client, :peer_service=>nil}
+2026-05-20T13:27:22.208283800Z Instrumentation: OpenTelemetry::Instrumentation::Grape was successfully installed with the following options {:ignored_events=>[], :install_rack=>true}
+2026-05-20T13:27:22.210268583Z Instrumentation: OpenTelemetry::Instrumentation::GraphQL was successfully installed with the following options {:schemas=>[], :enable_platform_field=>false, :enable_platform_authorized=>false, :enable_platform_resolve_type=>false, :legacy_platform_span_names=>false, :legacy_tracing=>true}
+2026-05-20T13:27:22.210625428Z Instrumentation: OpenTelemetry::Instrumentation::Mongo failed to install
+2026-05-20T13:27:22.211941063Z Instrumentation: OpenTelemetry::Instrumentation::Net::HTTP was successfully installed with the following options {:untraced_hosts=>[]}
+2026-05-20T13:27:22.212172596Z Instrumentation: OpenTelemetry::Instrumentation::PG failed to install
+2026-05-20T13:27:22.212191376Z Instrumentation: OpenTelemetry::Instrumentation::Rails was successfully installed with the following options {}
+2026-05-20T13:27:22.213080827Z Instrumentation: OpenTelemetry::Instrumentation::Rake was successfully installed with the following options {}
+2026-05-20T13:27:22.213336160Z Instrumentation: OpenTelemetry::Instrumentation::Rdkafka failed to install
+2026-05-20T13:27:22.213353170Z Instrumentation: OpenTelemetry::Instrumentation::Redis failed to install
+2026-05-20T13:27:22.214481964Z Instrumentation: OpenTelemetry::Instrumentation::RestClient was successfully installed with the following options {:peer_service=>nil}
+2026-05-20T13:27:22.219942569Z Instrumentation: OpenTelemetry::Instrumentation::Sidekiq was successfully installed with the following options {:span_naming=>:queue, :propagation_style=>:link, :trace_launcher_heartbeat=>true, :trace_poller_enqueue=>false, :trace_poller_wait=>false, :trace_processor_process_one=>false, :peer_service=>nil}
+2026-05-20T13:27:24.080225538Z RedisConfig: calling redis_client_from_uri with uri: redis://sample-redis.example.local/0
+2026-05-20T13:27:26.028256017Z Overwriting existing field password_archivable_type in class OldPassword.
+2026-05-20T13:27:41.481222601Z * Listening on http://0.0.0.0:3000
+2026-05-20T13:27:41.483409348Z * Starting control server on http://0.0.0.0:9293
+2026-05-20T13:27:41.517275864Z Use Ctrl-C to stop
+2026-05-20T13:27:45.513282585Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/gJI with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/gJI is 6: unauthorized
+2026-05-20T13:27:45.610795765Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/i64 with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/i64 is 6: unauthorized
+2026-05-20T13:27:45.789484690Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/gJI with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/gJI is 6: unauthorized
+2026-05-20T13:27:45.848696813Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/i64 with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/i64 is 6: unauthorized
+2026-05-20T13:27:45.871401436Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/i64 with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/i64 is 6: unauthorized
+2026-05-20T13:27:46.228960014Z MONGODB | TLS certificate of 'sample-mongodb-shard.example.local' could not be definitively verified via OCSP: For responders http://o.pki.goog/s/wr1/gJI with a timeout of 5 seconds: OCSP response from http://o.pki.goog/s/wr1/gJI is 6: unauthorized
+2026-05-20T13:27:46.640147239Z {"method":"GET","path":"/members","format":"*/*","controller":"MembersController","action":"index","status":200,"duration":1474.2,"view":0.59,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:27:46.649361250Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.49,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:27:56.653810971Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":1.44,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:28:05.156345543Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.35,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:28:06.649728674Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.37,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:28:16.652676096Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.35,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:28:26.648927725Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.33,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T13:28:35.155926507Z {"method":"GET","path":"/status","format":"*/*","controller":"SiteController","action":"status","status":200,"duration":0.36,"view":0.0,"params":{},"ip":"192.0.2.10","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000"}
+2026-05-20T16:29:11.491247496Z Failed to GeoIP the ip_address . (invalid address: )
+2026-05-20T16:29:11.547864784Z Failed to GeoIP the ip_address . (invalid address: )

@@ -1,5 +1,6 @@
-[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/single-container-pod
-[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed
-[2026-05-15 00:38:04] [LOG] [WARN] 2026-05-15T00:38:04Z WARN upstream latency high
-[2026-05-15 00:38:05] [EVENT] [Warning] BackOff: Back-off restarting failed container
-[2026-05-15 00:38:06] [LOG] [ERROR] 2026-05-15T00:38:06Z ERROR database connection failed
+[2026-05-15 00:38:00] [EVENT] [Warning] pod/other-pod Unhealthy: Namespace event for another pod
+[2026-05-15 00:38:01] [EVENT] [Normal] pod/single-container-pod Scheduled: Successfully assigned default/single-container-pod
+[2026-05-15 00:38:03] [EVENT] [Warning] pod/single-container-pod Unhealthy: Readiness probe failed
+[2026-05-15 00:38:04] [LOG] [WARN] WARN upstream latency high
+[2026-05-15 00:38:05] [EVENT] [Warning] pod/single-container-pod BackOff: Back-off restarting failed container
+[2026-05-15 00:38:06] [LOG] [ERROR] ERROR database connection failed
