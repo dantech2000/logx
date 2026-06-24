@@ -2,7 +2,6 @@
 package kubernetes
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -16,8 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
-
-const maxLogLineSize = 1024 * 1024
 
 // LogFetcher handles retrieving logs from Kubernetes containers
 type LogFetcher struct {
@@ -178,8 +175,7 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	defer func() { _ = podLogs.Close() }()
 
 	// Create a scanner to read logs line by line
-	scanner := bufio.NewScanner(podLogs)
-	scanner.Buffer(make([]byte, 64*1024), maxLogLineSize)
+	scanner := logging.NewLineScanner(podLogs)
 	logWriter := NewLogWriter(lf.Writer)
 	logWriter.filterLevel = lf.FilterLevel
 

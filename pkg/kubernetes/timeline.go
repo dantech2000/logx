@@ -1,7 +1,6 @@
 package kubernetes
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"sort"
@@ -159,8 +158,7 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 	defer func() { _ = podLogs.Close() }()
 
 	var items []timelineItem
-	scanner := bufio.NewScanner(podLogs)
-	scanner.Buffer(make([]byte, 64*1024), maxLogLineSize)
+	scanner := logging.NewLineScanner(podLogs)
 	for scanner.Scan() {
 		entry := logging.ParseKubernetesLogEntry(scanner.Text())
 		if entry.Level < lf.FilterLevel {
