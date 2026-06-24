@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/dantech2000/logx/pkg/kubernetes"
@@ -28,12 +27,7 @@ var logsCmd = &cobra.Command{
 	Long: `Display logs for a Kubernetes pod. You can filter logs by level using the --level flag.
 Supported levels are DEBUG, INFO, WARN, and ERROR.`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := runLogs(cmd, args); err != nil {
-			fmt.Printf("Error running logs command: %v\n", err)
-			os.Exit(1)
-		}
-	},
+	RunE: runLogs,
 }
 
 func init() {
@@ -163,7 +157,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		options.podName,
 		options.follow,
 		options.previous,
-		os.Stdout,
+		cmd.OutOrStdout(),
 	)
 	logFetcher.ContainerName = options.container
 	logFetcher.FilterLevel = filterLevel

@@ -3,7 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"runtime"
 
 	"github.com/dantech2000/logx/pkg/version"
@@ -46,7 +46,7 @@ or specify an output format using the --output flag.`,
   
   # Get version info in YAML format
   logx version --output yaml`,
-	Run: runVersion,
+	RunE: runVersion,
 }
 
 func init() {
@@ -66,46 +66,48 @@ func getVersionData(version version.Version) versionData {
 	}
 }
 
-func runVersion(cmd *cobra.Command, args []string) {
+func runVersion(cmd *cobra.Command, args []string) error {
 	short, _ := cmd.Flags().GetBool("short")
 	output, _ := cmd.Flags().GetString("output")
 
-	version := version.CurrentVersion
+	return writeVersion(cmd.OutOrStdout(), version.CurrentVersion, short, output)
+}
 
+// writeVersion renders version information to w in the requested form. It is
+// separated from the cobra command so it can be unit-tested directly.
+func writeVersion(w io.Writer, v version.Version, short bool, output string) error {
 	if short {
-		fmt.Println(version.String())
-		return
+		_, err := fmt.Fprintln(w, v.String())
+		return err
 	}
 
 	switch output {
 	case "json":
-		printJSON(version)
+		return printJSON(w, v)
 	case "yaml":
-		printYAML(version)
+		return printYAML(w, v)
 	case "":
-		fmt.Println(version.FullString())
+		_, err := fmt.Fprintln(w, v.FullString())
+		return err
 	default:
-		fmt.Printf("Error: unsupported output format %q\n", output)
-		os.Exit(1)
+		return fmt.Errorf("unsupported output format %q", output)
 	}
 }
 
-func printJSON(version version.Version) {
-	data := getVersionData(version)
-	jsonData, err := json.MarshalIndent(data, "", "  ")
+func printJSON(w io.Writer, v version.Version) error {
+	jsonData, err := json.MarshalIndent(getVersionData(v), "", "  ")
 	if err != nil {
-		fmt.Printf("Error creating JSON output: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("creating JSON output: %w", err)
 	}
-	fmt.Println(string(jsonData))
+	_, err = fmt.Fprintln(w, string(jsonData))
+	return err
 }
 
-func printYAML(version version.Version) {
-	data := getVersionData(version)
-	yamlData, err := yaml.Marshal(data)
+func printYAML(w io.Writer, v version.Version) error {
+	yamlData, err := yaml.Marshal(getVersionData(v))
 	if err != nil {
-		fmt.Printf("Error creating YAML output: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("creating YAML output: %w", err)
 	}
-	fmt.Println(string(yamlData))
+	_, err = fmt.Fprintln(w, string(yamlData))
+	return err
 }

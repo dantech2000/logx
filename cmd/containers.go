@@ -2,11 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/dantech2000/logx/pkg/format"
 	"github.com/dantech2000/logx/pkg/kubernetes"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +27,7 @@ Example usage:
   logx containers my-pod -n my-namespace -o yaml
   logx containers my-pod -n my-namespace -o posix`,
 	Args: cobra.ExactArgs(1),
-	Run:  runContainers,
+	RunE: runContainers,
 }
 
 func init() {
@@ -52,31 +50,28 @@ func getContainerOptions(cmd *cobra.Command, args []string) (*containerOptions, 
 	}, nil
 }
 
-func runContainers(cmd *cobra.Command, args []string) {
+func runContainers(cmd *cobra.Command, args []string) error {
 	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
-		color.Red("Error creating Kubernetes client: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
 	opts, err := getContainerOptions(cmd, args)
 	if err != nil {
-		color.Red("Error getting command options: %v", err)
-		os.Exit(1)
+		return err
 	}
 
 	containers, err := kubernetes.ListContainers(clientset, namespace, opts.podName)
 	if err != nil {
-		color.Red("Error listing containers: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("listing containers: %w", err)
 	}
 
 	formatter := format.NewOutputFormatter(opts.podName, namespace, containers)
 	output, err := formatter.FormatOutput(opts.outputFormat)
 	if err != nil {
-		color.Red("Error formatting output: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("formatting output: %w", err)
 	}
 
-	fmt.Println(output)
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), output)
+	return err
 }

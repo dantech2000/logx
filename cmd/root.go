@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 )
 
@@ -21,25 +18,22 @@ It provides features such as:
 
 Use "logx [command] --help" for more information about a command.`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	// Errors are surfaced once by main via Execute; cobra should not also print
+	// them or the usage text on a runtime (non-usage) error.
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			_ = cmd.Help()
-			return
+			return cmd.Help()
 		}
-		if err := runLogs(cmd, args); err != nil {
-			fmt.Printf("Error running logs command: %v\n", err)
-			os.Exit(1)
-		}
+		return runLogs(cmd, args)
 	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+// Execute runs the root command and returns any error to the caller (main),
+// which is responsible for reporting it and setting the exit code.
+func Execute() error {
+	return rootCmd.Execute()
 }
 
 func init() {
