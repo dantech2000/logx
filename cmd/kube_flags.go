@@ -37,16 +37,18 @@ func kubeOptionsFromFlags(cmd *cobra.Command) (kubernetes.ClientOptions, error) 
 	}, nil
 }
 
+// newKubernetesClient builds a Kubernetes client from resolved options. It is a
+// package-level variable so tests can substitute a fake clientset in place of a
+// real cluster connection.
+var newKubernetesClient = func(opts kubernetes.ClientOptions) (k8skubernetes.Interface, string, error) {
+	return kubernetes.GetKubernetesClient(opts)
+}
+
 func kubernetesClientFromFlags(cmd *cobra.Command) (k8skubernetes.Interface, string, error) {
 	opts, err := kubeOptionsFromFlags(cmd)
 	if err != nil {
 		return nil, "", err
 	}
 
-	clientset, namespace, err := kubernetes.GetKubernetesClient(opts)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return clientset, namespace, nil
+	return newKubernetesClient(opts)
 }
