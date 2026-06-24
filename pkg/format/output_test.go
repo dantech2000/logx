@@ -2,6 +2,7 @@ package format
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -44,10 +45,10 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 			name:   "json",
 			format: "json",
 			expected: []string{
-				`"PodName": "multi-container-pod"`,
-				`"Namespace": "default"`,
-				`"Name": "sidecar"`,
-				`"Status": "Waiting (CrashLoopBackOff)"`,
+				`"pod": "multi-container-pod"`,
+				`"namespace": "default"`,
+				`"name": "sidecar"`,
+				`"status": "Waiting (CrashLoopBackOff)"`,
 			},
 			hidden: []string{"migrate"},
 		},
@@ -55,7 +56,7 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 			name:   "yaml",
 			format: "yaml",
 			expected: []string{
-				"podname: multi-container-pod",
+				"pod: multi-container-pod",
 				"namespace: default",
 				"name: worker",
 				"status: Terminated (Error)",
@@ -87,6 +88,46 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOutputFormatterJSONRoundTrips(t *testing.T) {
+	formatter := NewOutputFormatter("mypod", "ns", []kubernetes.ContainerInfo{
+		{Name: "app", Ready: true, Status: "Running", Image: "repo/app:1.0"},
+	})
+	out, err := formatter.FormatOutput("json")
+	if err != nil {
+		t.Fatalf("FormatOutput(json) error = %v", err)
+	}
+
+	var decoded containerListDTO
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("json output does not round-trip: %v\n%s", err, out)
+	}
+	if decoded.Pod != "mypod" || decoded.Namespace != "ns" || len(decoded.Containers) != 1 {
+		t.Fatalf("decoded = %+v, want pod/ns/1 container", decoded)
+	}
+	c := decoded.Containers[0]
+	if c.Name != "app" || !c.Ready || c.Status != "Running" || c.Image != "repo/app:1.0" {
+		t.Fatalf("decoded container = %+v", c)
+	}
+}
+
+func TestOutputFormatterSanitizesMachineOutput(t *testing.T) {
+	// A crafted image reference carrying an ANSI escape must not survive into any
+	// output format that may be printed to a terminal.
+	evil := "repo/app:\x1b[31mred"
+	formatter := NewOutputFormatter("pod", "ns", []kubernetes.ContainerInfo{
+		{Name: "app", Ready: true, Status: "Running", Image: evil},
+	})
+	for _, format := range []string{"json", "yaml", "posix", "table"} {
+		out, err := formatter.FormatOutput(format)
+		if err != nil {
+			t.Fatalf("FormatOutput(%q) error = %v", format, err)
+		}
+		if strings.Contains(out, "\x1b") {
+			t.Fatalf("format %q leaked raw escape byte: %q", format, out)
+		}
 	}
 }
 
