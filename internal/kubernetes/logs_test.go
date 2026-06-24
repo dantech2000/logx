@@ -734,6 +734,62 @@ func TestLogFetcher_GetTimelineNotesTruncatedEvents(t *testing.T) {
 	}
 }
 
+func TestEventTimestampPrecedence(t *testing.T) {
+	eventT := time.Date(2026, 5, 15, 1, 0, 0, 0, time.UTC)
+	lastT := time.Date(2026, 5, 15, 2, 0, 0, 0, time.UTC)
+	firstT := time.Date(2026, 5, 15, 3, 0, 0, 0, time.UTC)
+	createdT := time.Date(2026, 5, 15, 4, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name  string
+		event corev1.Event
+		want  time.Time
+	}{
+		{
+			name: "EventTime wins over all others",
+			event: corev1.Event{
+				EventTime:      metav1.NewMicroTime(eventT),
+				LastTimestamp:  metav1.NewTime(lastT),
+				FirstTimestamp: metav1.NewTime(firstT),
+				ObjectMeta:     metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(createdT)},
+			},
+			want: eventT,
+		},
+		{
+			name: "LastTimestamp when EventTime is zero",
+			event: corev1.Event{
+				LastTimestamp:  metav1.NewTime(lastT),
+				FirstTimestamp: metav1.NewTime(firstT),
+				ObjectMeta:     metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(createdT)},
+			},
+			want: lastT,
+		},
+		{
+			name: "FirstTimestamp when EventTime and LastTimestamp are zero",
+			event: corev1.Event{
+				FirstTimestamp: metav1.NewTime(firstT),
+				ObjectMeta:     metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(createdT)},
+			},
+			want: firstT,
+		},
+		{
+			name: "CreationTimestamp as the final fallback",
+			event: corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(createdT)},
+			},
+			want: createdT,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := eventTimestamp(tt.event); !got.Equal(tt.want) {
+				t.Fatalf("eventTimestamp() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatTimelineEventHandlesUnknownType(t *testing.T) {
 	event := newTimelineEvent(*testEvent("Pod", "test-pod", "Critical", "NodePressure", "node is under pressure", "2026-05-15T00:38:07Z"))
 
