@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -162,7 +163,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.FilterLevel = filterLevel
 
 	if options.timeline && options.follow {
-		return fmt.Errorf("--timeline cannot be used with --follow")
+		return errors.New("--timeline cannot be used with --follow")
 	}
 
 	if options.timeline {

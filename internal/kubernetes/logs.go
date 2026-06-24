@@ -100,7 +100,7 @@ func (lf *LogFetcher) getSingleContainerName(ctx context.Context) (string, error
 	err = survey.AskOne(prompt, &selectedIdx, survey.WithPageSize(10))
 	if err != nil {
 		if errors.Is(err, terminal.InterruptErr) {
-			return "", fmt.Errorf("operation cancelled")
+			return "", errors.New("operation cancelled")
 		}
 		return "", fmt.Errorf("selection failed: %w", err)
 	}

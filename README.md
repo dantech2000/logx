@@ -135,11 +135,16 @@ kubectl logx my-pod -n my-namespace -c my-container --timeline -l WARN
 Example output:
 
 ```text
-[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/my-pod
-[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed
+[2026-05-15 00:38:01] [EVENT] [Normal] pod/my-pod Scheduled: Successfully assigned default/my-pod
+[2026-05-15 00:38:03] [EVENT] [Warning] pod/my-pod Unhealthy: Readiness probe failed
 [2026-05-15 00:38:04] [LOG] [ERROR] request failed
-[2026-05-15 00:38:05] [EVENT] [Warning] BackOff: Back-off restarting failed container
+[2026-05-15 00:38:05] [EVENT] [Warning] pod/my-pod BackOff: Back-off restarting failed container (x3)
 ```
+
+Only events for the target pod are shown. Repeated events are annotated with
+their occurrence count (e.g. `(x3)`). If logs cannot be read but events are
+available (such as `ImagePullBackOff`), the events are still shown with a
+`[notice]` explaining that logs were unavailable.
 
 `--timeline` is intended for point-in-time troubleshooting and cannot be combined with `--follow`.
 
