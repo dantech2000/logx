@@ -30,10 +30,14 @@
           };
 
           shellHook = ''
-            exec zsh
             echo "logx dev shell"
             echo "Go: $(go version)"
             echo "Common tasks: just test, just build, goreleaser check"
+            # Drop into an interactive zsh, but only when running interactively
+            # and zsh is available, so CI and non-zsh shells are not broken.
+            if [ -z "$LOGX_NO_ZSH" ] && [ -t 1 ] && command -v zsh >/dev/null 2>&1; then
+              exec zsh
+            fi
           '';
         };
       }
