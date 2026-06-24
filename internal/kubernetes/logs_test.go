@@ -790,6 +790,42 @@ func TestEventTimestampPrecedence(t *testing.T) {
 	}
 }
 
+func TestEventCount(t *testing.T) {
+	tests := []struct {
+		name  string
+		event corev1.Event
+		want  int32
+	}{
+		{
+			name:  "legacy Count",
+			event: corev1.Event{Count: 5},
+			want:  5,
+		},
+		{
+			name:  "Series.Count preferred over legacy Count",
+			event: corev1.Event{Count: 5, Series: &corev1.EventSeries{Count: 9}},
+			want:  9,
+		},
+		{
+			name:  "falls back to legacy Count when Series.Count is zero",
+			event: corev1.Event{Count: 3, Series: &corev1.EventSeries{Count: 0}},
+			want:  3,
+		},
+		{
+			name:  "zero when nothing is set",
+			event: corev1.Event{},
+			want:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := eventCount(tt.event); got != tt.want {
+				t.Fatalf("eventCount() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatTimelineEventHandlesUnknownType(t *testing.T) {
 	event := newTimelineEvent(*testEvent("Pod", "test-pod", "Critical", "NodePressure", "node is under pressure", "2026-05-15T00:38:07Z"))
 

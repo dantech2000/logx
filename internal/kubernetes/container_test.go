@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -113,6 +114,67 @@ func TestListContainersUnknownStatus(t *testing.T) {
 	want := ContainerInfo{Name: "app", Ready: false, Status: "Unknown", Image: "app-image"}
 	if got[0] != want {
 		t.Fatalf("container[0] = %#v, want %#v", got[0], want)
+	}
+}
+
+func TestFormatContainerInfo(t *testing.T) {
+	ready := FormatContainerInfo(ContainerInfo{Name: "app", Ready: true, Status: "Running", Image: "repo/app:1.0"})
+	if !strings.Contains(ready, "app") || !strings.Contains(ready, "Running") || !strings.Contains(ready, "repo/app:1.0") {
+		t.Fatalf("ready row missing fields: %q", ready)
+	}
+	if !strings.Contains(ready, "✓") {
+		t.Fatalf("ready row should use the ready symbol: %q", ready)
+	}
+
+	notReady := FormatContainerInfo(ContainerInfo{Name: "app", Ready: false, Status: "Waiting", Image: "img"})
+	if !strings.Contains(notReady, "✗") {
+		t.Fatalf("not-ready row should use the not-ready symbol: %q", notReady)
+	}
+}
+
+func TestFormatContainerInfoSanitizes(t *testing.T) {
+	got := FormatContainerInfo(ContainerInfo{Name: "app", Ready: true, Status: "Running", Image: "img\x1b[31m"})
+	if strings.Contains(got, "\x1b") {
+		t.Fatalf("FormatContainerInfo leaked an escape byte: %q", got)
+	}
+}
+
+func TestGetSingleContainerNameSingle(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "solo", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "only", Image: "img"}}},
+	}
+	clientset := fake.NewSimpleClientset(pod)
+	fetcher := NewLogFetcher(clientset, "default", "solo", false, false, nil)
+
+	name, err := fetcher.getSingleContainerName(context.Background())
+	if err != nil {
+		t.Fatalf("getSingleContainerName() error = %v", err)
+	}
+	if name != "only" {
+		t.Fatalf("name = %q, want %q", name, "only")
+	}
+}
+
+func TestGetSingleContainerNameNoContainers(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
+		Spec:       corev1.PodSpec{},
+	}
+	clientset := fake.NewSimpleClientset(pod)
+	fetcher := NewLogFetcher(clientset, "default", "empty", false, false, nil)
+
+	if _, err := fetcher.getSingleContainerName(context.Background()); err == nil {
+		t.Fatal("getSingleContainerName() error = nil, want error for pod with no containers")
+	}
+}
+
+func TestGetSingleContainerNameMissingPod(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	fetcher := NewLogFetcher(clientset, "default", "ghost", false, false, nil)
+
+	if _, err := fetcher.getSingleContainerName(context.Background()); err == nil {
+		t.Fatal("getSingleContainerName() error = nil, want error for missing pod")
 	}
 }
 
