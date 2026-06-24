@@ -61,7 +61,7 @@ func runContainers(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	containers, err := kubernetes.ListContainers(clientset, namespace, opts.podName)
+	containers, err := kubernetes.ListContainers(cmd.Context(), clientset, namespace, opts.podName)
 	if err != nil {
 		return fmt.Errorf("listing containers: %w", err)
 	}

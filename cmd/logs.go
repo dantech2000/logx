@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -55,7 +54,7 @@ func completePodNames(cmd *cobra.Command, args []string, toComplete string) ([]s
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	pods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+	pods, err := clientset.CoreV1().Pods(namespace).List(cmd.Context(), metav1.ListOptions{
 		Limit: 100,
 	})
 	if err != nil {
@@ -84,7 +83,7 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 	}
 
 	podName := args[0]
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+	pod, err := clientset.CoreV1().Pods(namespace).Get(cmd.Context(), podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -167,9 +166,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	if options.timeline {
-		err = logFetcher.GetTimeline()
+		err = logFetcher.GetTimeline(cmd.Context())
 	} else {
-		err = logFetcher.GetLogs()
+		err = logFetcher.GetLogs(cmd.Context())
 	}
 	if err != nil {
 		return fmt.Errorf("error fetching logs: %w", err)

@@ -42,9 +42,9 @@ func TestListContainersFromPodFixtures(t *testing.T) {
 			pod := readPodFixture(t, tt.fixture)
 			clientset := fake.NewSimpleClientset(pod)
 
-			got, err := ListContainers(clientset, pod.Namespace, pod.Name)
+			got, err := ListContainers(context.Background(), clientset, pod.Namespace, pod.Name)
 			if err != nil {
-				t.Fatalf("ListContainers() error = %v", err)
+				t.Fatalf("ListContainers(context.Background(), ) error = %v", err)
 			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("container count = %d, want %d: %#v", len(got), len(tt.want), got)
@@ -57,7 +57,7 @@ func TestListContainersFromPodFixtures(t *testing.T) {
 			for _, name := range tt.notWanted {
 				for _, container := range got {
 					if container.Name == name {
-						t.Fatalf("ListContainers() included init container %q", name)
+						t.Fatalf("ListContainers(context.Background(), ) included init container %q", name)
 					}
 				}
 			}
@@ -89,8 +89,8 @@ func readPodFixture(t *testing.T, path string) *corev1.Pod {
 func TestListContainersMissingPod(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
-	if _, err := ListContainers(clientset, "default", "missing-pod"); err == nil {
-		t.Fatal("ListContainers() error = nil, want error")
+	if _, err := ListContainers(context.Background(), clientset, "default", "missing-pod"); err == nil {
+		t.Fatal("ListContainers(context.Background(), ) error = nil, want error")
 	}
 }
 
@@ -103,9 +103,9 @@ func TestListContainersUnknownStatus(t *testing.T) {
 	}
 	clientset := fake.NewSimpleClientset(pod)
 
-	got, err := ListContainers(clientset, "default", "unknown-status-pod")
+	got, err := ListContainers(context.Background(), clientset, "default", "unknown-status-pod")
 	if err != nil {
-		t.Fatalf("ListContainers() error = %v", err)
+		t.Fatalf("ListContainers(context.Background(), ) error = %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("container count = %d, want 1", len(got))
@@ -123,7 +123,7 @@ func TestListContainersUsesPodNamespace(t *testing.T) {
 		t.Fatalf("create pod: %v", err)
 	}
 
-	if _, err := ListContainers(clientset, "other", pod.Name); err == nil {
-		t.Fatal("ListContainers() error = nil, want namespace lookup error")
+	if _, err := ListContainers(context.Background(), clientset, "other", pod.Name); err == nil {
+		t.Fatal("ListContainers(context.Background(), ) error = nil, want namespace lookup error")
 	}
 }

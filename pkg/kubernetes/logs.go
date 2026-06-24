@@ -55,8 +55,7 @@ func NewLogFetcher(clientset kubernetes.Interface, namespace, podName string, fo
 // getSingleContainerName returns the name of the container to fetch logs from.
 // If there's only one container, it returns that container's name.
 // If there are multiple containers, it prompts the user to select one.
-func (lf *LogFetcher) getSingleContainerName() (string, error) {
-	ctx := context.Background()
+func (lf *LogFetcher) getSingleContainerName(ctx context.Context) (string, error) {
 	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("error fetching pod details: %w", err)
@@ -113,8 +112,7 @@ func (lf *LogFetcher) getSingleContainerName() (string, error) {
 }
 
 // hasPreviousContainer checks if a container has previous terminated instances
-func (lf *LogFetcher) hasPreviousContainer(containerName string) (bool, error) {
-	ctx := context.Background()
+func (lf *LogFetcher) hasPreviousContainer(ctx context.Context, containerName string) (bool, error) {
 	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
 	if err != nil {
 		return false, fmt.Errorf("error fetching pod details: %w", err)
@@ -160,8 +158,8 @@ func NewLogWriter(w io.Writer) *LogWriter {
 // GetLogs retrieves logs from the specified container.
 // If no container is specified, it will prompt the user to select one.
 // It handles both current and previous container instances based on the Previous flag.
-func (lf *LogFetcher) GetLogs() error {
-	if err := lf.prepareLogRequest(); err != nil {
+func (lf *LogFetcher) GetLogs(ctx context.Context) error {
+	if err := lf.prepareLogRequest(ctx); err != nil {
 		return err
 	}
 
@@ -172,7 +170,6 @@ func (lf *LogFetcher) GetLogs() error {
 		Previous:  lf.Previous,
 	}
 
-	ctx := context.Background()
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
 	podLogs, err := req.Stream(ctx)
 	if err != nil {

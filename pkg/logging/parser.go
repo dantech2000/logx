@@ -368,6 +368,10 @@ func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
 		return DEBUG, false
 	}
 
+	// Map by status class. 5xx is an error, 4xx a warning. 1xx/2xx/3xx are
+	// successful/informational requests and are intentionally classified as
+	// DEBUG so high-volume access logs stay out of the default INFO view; raise
+	// verbosity to --level DEBUG to see them.
 	switch {
 	case status >= 500:
 		return ERROR, true
@@ -597,6 +601,18 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	}
 }
 
+// parseNumericLogLevel maps a numeric level to a LogLevel. It targets the two
+// numbering schemes common in the Go/Kubernetes ecosystem this tool serves:
+//
+//   - zap-style small integers, where Info=0, Warn=1, Error=2 (handled below as
+//     explicit cases);
+//   - bunyan/pino-style decades, where Trace=10, Debug=20, Info=30, Warn=40,
+//     Error=50, Fatal=60 (handled by the range checks).
+//
+// Note: syslog and OpenTelemetry severity numbers invert this (0/low = most
+// severe), which is irreconcilable with zap's 0=Info without per-log context.
+// We deliberately favor the zap convention; OTel/syslog producers should emit a
+// textual severity field (severity_text), which the string path handles.
 func parseNumericLogLevel(level int) LogLevel {
 	switch level {
 	case 0:

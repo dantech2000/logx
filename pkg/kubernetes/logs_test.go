@@ -115,7 +115,7 @@ func TestLogFetcher_GetLogs(t *testing.T) {
 			fetcher := NewLogFetcher(clientset, "default", "test-pod", tt.follow, tt.previous, &buf)
 			fetcher.ContainerName = tt.containerName
 
-			err := fetcher.GetLogs()
+			err := fetcher.GetLogs(context.Background())
 			if (err != nil) != tt.wantError {
 				t.Errorf("GetLogs() error = %v, wantError %v", err, tt.wantError)
 			}
@@ -234,7 +234,7 @@ func TestLogFetcher_GetLogsFiltersByLevel(t *testing.T) {
 					fetcher := newTestLogFetcher(t, string(logs), &buf)
 					fetcher.FilterLevel = tc.level
 
-					if err := fetcher.GetLogs(); err != nil {
+					if err := fetcher.GetLogs(context.Background()); err != nil {
 						t.Fatalf("GetLogs() error = %v", err)
 					}
 
@@ -331,7 +331,7 @@ func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.ERROR
 
-	if err := fetcher.GetLogs(); err != nil {
+	if err := fetcher.GetLogs(context.Background()); err != nil {
 		t.Fatalf("GetLogs() error = %v", err)
 	}
 	if gotOptions == nil {
@@ -390,7 +390,7 @@ func TestLogFetcher_GetLogsFormatsDeterministicFixtureOutput(t *testing.T) {
 			fetcher := newTestLogFetcher(t, string(logs), &buf)
 			fetcher.FilterLevel = tt.level
 
-			if err := fetcher.GetLogs(); err != nil {
+			if err := fetcher.GetLogs(context.Background()); err != nil {
 				t.Fatalf("GetLogs() error = %v", err)
 			}
 			if got := buf.String(); got != string(want) {
@@ -437,7 +437,7 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.INFO
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -483,7 +483,7 @@ func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.WARN
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 	if got := buf.String(); got != string(want) {
@@ -518,7 +518,7 @@ func TestLogFetcher_GetTimelineExcludesForeignObjectEvents(t *testing.T) {
 	fetcher.ContainerName = "sample-proxy"
 	fetcher.FilterLevel = logging.WARN
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -566,7 +566,7 @@ func TestLogFetcher_GetTimelineAggregatesRepeatedEvents(t *testing.T) {
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.WARN
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -597,7 +597,7 @@ func TestLogFetcher_GetTimelineOrdersRealPlainFrameworkLogs(t *testing.T) {
 	fetcher.ContainerName = "web"
 	fetcher.FilterLevel = logging.DEBUG
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -636,7 +636,7 @@ func TestLogFetcher_GetTimelineParsesRealRailsLogs(t *testing.T) {
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.DEBUG
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -675,7 +675,7 @@ func TestLogFetcher_GetTimelineShowsEventsWhenLogsUnavailable(t *testing.T) {
 	fetcher.ContainerName = "sample-imagepull-app"
 	fetcher.FilterLevel = logging.DEBUG
 
-	if err := fetcher.GetTimeline(); err != nil {
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
 		t.Fatalf("GetTimeline() error = %v", err)
 	}
 
@@ -851,7 +851,7 @@ func TestLogFetcher_hasPreviousContainer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, nil)
-			got, err := fetcher.hasPreviousContainer(tt.containerName)
+			got, err := fetcher.hasPreviousContainer(context.Background(), tt.containerName)
 			if (err != nil) != tt.wantError {
 				t.Errorf("hasPreviousContainer() error = %v, wantError %v", err, tt.wantError)
 				return

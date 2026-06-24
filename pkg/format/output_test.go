@@ -1,6 +1,7 @@
 package format
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 	pod := readPodFixture(t, "../kubernetes/testdata/pods/multi-container-statuses.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	containers, err := kubernetes.ListContainers(clientset, pod.Namespace, pod.Name)
+	containers, err := kubernetes.ListContainers(context.Background(), clientset, pod.Namespace, pod.Name)
 	if err != nil {
 		t.Fatalf("ListContainers() error = %v", err)
 	}

@@ -51,17 +51,17 @@ var timelineEventTypeColors = map[timelineEventType]*color.Color{
 }
 
 // GetTimeline writes pod logs and Kubernetes events together sorted by timestamp.
-func (lf *LogFetcher) GetTimeline() error {
-	if err := lf.prepareLogRequest(); err != nil {
+func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
+	if err := lf.prepareLogRequest(ctx); err != nil {
 		return err
 	}
 
-	items, err := lf.collectLogTimelineItems()
+	items, err := lf.collectLogTimelineItems(ctx)
 	logErr := err
 	if err != nil {
 		items = nil
 	}
-	eventItems, err := lf.collectEventTimelineItems(len(items))
+	eventItems, err := lf.collectEventTimelineItems(ctx, len(items))
 	if err != nil {
 		return err
 	}
@@ -95,16 +95,15 @@ func (lf *LogFetcher) GetTimeline() error {
 	return nil
 }
 
-func (lf *LogFetcher) prepareLogRequest() error {
+func (lf *LogFetcher) prepareLogRequest(ctx context.Context) error {
 	if lf.ContainerName == "" {
-		containerName, err := lf.getSingleContainerName()
+		containerName, err := lf.getSingleContainerName(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get container name: %w", err)
 		}
 		lf.ContainerName = containerName
 	}
 
-	ctx := context.Background()
 	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("error fetching pod details: %w", err)
@@ -122,7 +121,7 @@ func (lf *LogFetcher) prepareLogRequest() error {
 	}
 
 	if lf.Previous {
-		hasPrevious, err := lf.hasPreviousContainer(lf.ContainerName)
+		hasPrevious, err := lf.hasPreviousContainer(ctx, lf.ContainerName)
 		if err != nil {
 			return fmt.Errorf("failed to check for previous container: %w", err)
 		}
@@ -135,7 +134,7 @@ func (lf *LogFetcher) prepareLogRequest() error {
 	return nil
 }
 
-func (lf *LogFetcher) collectLogTimelineItems() ([]timelineItem, error) {
+func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineItem, error) {
 	podLogOpts := corev1.PodLogOptions{
 		Container:  lf.ContainerName,
 		Follow:     false,
@@ -144,7 +143,7 @@ func (lf *LogFetcher) collectLogTimelineItems() ([]timelineItem, error) {
 	}
 
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
-	podLogs, err := req.Stream(context.Background())
+	podLogs, err := req.Stream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error opening log stream: %w", err)
 	}
@@ -170,7 +169,7 @@ func (lf *LogFetcher) collectLogTimelineItems() ([]timelineItem, error) {
 	return items, nil
 }
 
-func (lf *LogFetcher) collectEventTimelineItems(orderOffset int) ([]timelineItem, error) {
+func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset int) ([]timelineItem, error) {
 	// Scope the server-side query to events for this pod: this avoids reading the
 	// whole namespace's events (which leaks unrelated workloads, needs broad RBAC,
 	// and floods the timeline) and bounds the result size.
@@ -178,7 +177,7 @@ func (lf *LogFetcher) collectEventTimelineItems(orderOffset int) ([]timelineItem
 		FieldSelector: fields.OneTermEqualSelector("involvedObject.name", lf.PodName).String(),
 		Limit:         maxTimelineEvents,
 	}
-	events, err := lf.Clientset.CoreV1().Events(lf.Namespace).List(context.Background(), listOpts)
+	events, err := lf.Clientset.CoreV1().Events(lf.Namespace).List(ctx, listOpts)
 	if err != nil {
 		return nil, fmt.Errorf("error listing events: %w", err)
 	}

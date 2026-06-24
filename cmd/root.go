@@ -1,6 +1,11 @@
 package cmd
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/spf13/cobra"
 )
 
@@ -31,9 +36,13 @@ Use "logx [command] --help" for more information about a command.`,
 }
 
 // Execute runs the root command and returns any error to the caller (main),
-// which is responsible for reporting it and setting the exit code.
+// which is responsible for reporting it and setting the exit code. It installs a
+// signal-aware context so SIGINT/SIGTERM cancel in-flight operations (notably a
+// --follow log stream) cleanly rather than killing the process abruptly.
 func Execute() error {
-	return rootCmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
