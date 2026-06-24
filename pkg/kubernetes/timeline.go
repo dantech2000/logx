@@ -13,7 +13,12 @@ import (
 	"github.com/fatih/color"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 )
+
+// maxTimelineEvents bounds how many Kubernetes events are pulled into a single
+// timeline so a busy pod cannot exhaust memory.
+const maxTimelineEvents = 500
 
 type timelineEventType int
 
@@ -36,6 +41,7 @@ type timelineEvent struct {
 	Object    string
 	Reason    string
 	Message   string
+	Count     int32
 }
 
 var timelineEventTypeColors = map[timelineEventType]*color.Color{
@@ -165,13 +171,25 @@ func (lf *LogFetcher) collectLogTimelineItems() ([]timelineItem, error) {
 }
 
 func (lf *LogFetcher) collectEventTimelineItems(orderOffset int) ([]timelineItem, error) {
-	events, err := lf.Clientset.CoreV1().Events(lf.Namespace).List(context.Background(), metav1.ListOptions{})
+	// Scope the server-side query to events for this pod: this avoids reading the
+	// whole namespace's events (which leaks unrelated workloads, needs broad RBAC,
+	// and floods the timeline) and bounds the result size.
+	listOpts := metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("involvedObject.name", lf.PodName).String(),
+		Limit:         maxTimelineEvents,
+	}
+	events, err := lf.Clientset.CoreV1().Events(lf.Namespace).List(context.Background(), listOpts)
 	if err != nil {
 		return nil, fmt.Errorf("error listing events: %w", err)
 	}
 
 	var items []timelineItem
 	for _, event := range events.Items {
+		// Guard client-side as well: not every API server (or test fake) enforces
+		// the field selector, so we never surface another object's events here.
+		if event.InvolvedObject.Name != lf.PodName {
+			continue
+		}
 		timelineEvent := newTimelineEvent(event)
 		items = append(items, timelineItem{
 			timestamp: timelineEvent.Timestamp,
@@ -199,7 +217,17 @@ func newTimelineEvent(event corev1.Event) timelineEvent {
 		Object:    formatEventObject(event.InvolvedObject),
 		Reason:    reason,
 		Message:   message,
+		Count:     eventCount(event),
 	}
+}
+
+// eventCount returns how many times an aggregated event has fired, preferring
+// the newer Series representation and falling back to the legacy Count field.
+func eventCount(event corev1.Event) int32 {
+	if event.Series != nil && event.Series.Count > 0 {
+		return event.Series.Count
+	}
+	return event.Count
 }
 
 func parseTimelineEventType(rawType string) (timelineEventType, string) {
@@ -238,19 +266,23 @@ func formatTimelineLog(entry logging.LogEntry) string {
 }
 
 func formatTimelineEvent(event timelineEvent) string {
+	message := terminal.Sanitize(event.Message)
+	if event.Count > 1 {
+		message = fmt.Sprintf("%s (x%d)", message, event.Count)
+	}
 	if event.Object != "" {
 		return fmt.Sprintf("%s [EVENT] [%s] %s %s: %s",
 			formatTimelineTimestamp(event.Timestamp),
 			formatTimelineEventType(event),
 			event.Object,
 			terminal.Sanitize(event.Reason),
-			terminal.Sanitize(event.Message))
+			message)
 	}
 	return fmt.Sprintf("%s [EVENT] [%s] %s: %s",
 		formatTimelineTimestamp(event.Timestamp),
 		formatTimelineEventType(event),
 		terminal.Sanitize(event.Reason),
-		terminal.Sanitize(event.Message))
+		message)
 }
 
 func formatTimelineEventType(event timelineEvent) string {

@@ -442,14 +442,19 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 	}
 
 	got := buf.String()
+	// Only the target pod's own events should appear, interleaved with its logs.
 	assertInOrder(t, got, []string{
-		"[2026-05-15 00:38:00] [EVENT] [Warning] pod/other-pod BackOff: Back-off restarting failed container",
 		"[2026-05-15 00:38:01] [EVENT] [Normal] pod/test-pod Scheduled: Successfully assigned default/test-pod",
 		"[2026-05-15 00:38:02] [LOG] [INFO] INFO application started",
 		"[2026-05-15 00:38:03] [EVENT] [Warning] pod/test-pod Unhealthy: Readiness probe failed",
 		"[2026-05-15 00:38:04] [LOG] [ERROR] ERROR request failed",
-		"[2026-05-15 00:38:05] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-04b4cdfbf4 SuccessfullyReconciled: Successfully reconciled",
 	})
+	// Events belonging to other objects in the namespace must be excluded.
+	for _, unwanted := range []string{"other-pod", "targetgroupbinding"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("timeline leaked unrelated object %q: %q", unwanted, got)
+		}
+	}
 }
 
 func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
@@ -486,7 +491,12 @@ func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
 	}
 }
 
-func TestLogFetcher_GetTimelineIncludesRealNamespaceEvents(t *testing.T) {
+// TestLogFetcher_GetTimelineExcludesForeignObjectEvents verifies that a pod's
+// timeline shows only that pod's own events. The real-traefik fixture's events
+// all belong to TargetGroupBinding objects (not the pod), so none of them should
+// surface — only the pod's logs appear. This guards against leaking unrelated
+// namespace activity into a single pod's timeline.
+func TestLogFetcher_GetTimelineExcludesForeignObjectEvents(t *testing.T) {
 	logs, err := os.ReadFile("testdata/real-traefik/logs.txt")
 	if err != nil {
 		t.Fatalf("read real timeline logs fixture: %v", err)
@@ -513,17 +523,55 @@ func TestLogFetcher_GetTimelineIncludesRealNamespaceEvents(t *testing.T) {
 	}
 
 	got := buf.String()
+	// The pod's own logs still appear.
 	assertInOrder(t, got, []string{
 		"[2026-05-15 00:38:04] [LOG] [WARN] Traefik can reject some encoded characters",
 		"[2026-05-15 00:38:05] [LOG] [WARN] Cross-namespace reference between IngressRoutes and resources is enabled",
-		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-04b4cdfbf4 SuccessfullyReconciled: Successfully reconciled",
-		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-1574c2ae0f SuccessfullyReconciled: Successfully reconciled",
-		"[2026-05-20 21:50:04] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-4cf5e6a381 SuccessfullyReconciled: Successfully reconciled",
-		"[2026-05-20 21:50:05] [EVENT] [Normal] targetgroupbinding/k8s-sample-edge-9747be237f SuccessfullyReconciled: Successfully reconciled",
+	})
+	// None of the TargetGroupBinding events should be present.
+	if strings.Contains(got, "targetgroupbinding") {
+		t.Fatalf("timeline leaked foreign-object events: %q", got)
+	}
+	if count := strings.Count(got, "[EVENT]"); count != 0 {
+		t.Fatalf("timeline event count = %d, want 0 (no pod events in fixture): %q", count, got)
+	}
+}
+
+// TestLogFetcher_GetTimelineAggregatesRepeatedEvents verifies that an event that
+// has fired multiple times is annotated with its occurrence count.
+func TestLogFetcher_GetTimelineAggregatesRepeatedEvents(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte("")}, nil
 	})
 
-	if count := strings.Count(got, "[EVENT] [Normal] targetgroupbinding/"); count != 4 {
-		t.Fatalf("timeline targetgroupbinding event count = %d, want 4: %q", count, got)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "app-image"}},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create test pod: %v", err)
+	}
+
+	event := testPodEvent("test-pod", "Warning", "BackOff", "Back-off restarting failed container", "2026-05-15T00:38:05Z")
+	event.Count = 7
+	if _, err := clientset.CoreV1().Events("default").Create(context.Background(), event, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.WARN
+
+	if err := fetcher.GetTimeline(); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	if got := buf.String(); !strings.Contains(got, "Back-off restarting failed container (x7)") {
+		t.Fatalf("timeline missing aggregated count: %q", got)
 	}
 }
 
