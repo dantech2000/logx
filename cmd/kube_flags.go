@@ -41,7 +41,13 @@ func kubeOptionsFromFlags(cmd *cobra.Command) (kubernetes.ClientOptions, error) 
 // package-level variable so tests can substitute a fake clientset in place of a
 // real cluster connection.
 var newKubernetesClient = func(opts kubernetes.ClientOptions) (k8skubernetes.Interface, string, error) {
-	return kubernetes.GetKubernetesClient(opts)
+	clientset, namespace, err := kubernetes.GetKubernetesClient(opts)
+	if err != nil {
+		// Return an untyped nil interface on error so callers that compare the
+		// result to nil are not surprised by a typed-nil *Clientset.
+		return nil, "", err
+	}
+	return clientset, namespace, nil
 }
 
 func kubernetesClientFromFlags(cmd *cobra.Command) (k8skubernetes.Interface, string, error) {

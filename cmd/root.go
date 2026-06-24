@@ -42,7 +42,15 @@ Use "logx [command] --help" for more information about a command.`,
 func Execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return rootCmd.ExecuteContext(ctx)
+
+	err := rootCmd.ExecuteContext(ctx)
+	// If the run was interrupted by a signal (e.g. Ctrl-C on a --follow stream),
+	// treat it as a clean cancellation rather than reporting the resulting
+	// "context canceled" error and exiting non-zero.
+	if err != nil && ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
 
 func init() {

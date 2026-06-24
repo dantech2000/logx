@@ -60,7 +60,7 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	if err != nil {
 		items = nil
 	}
-	eventItems, err := lf.collectEventTimelineItems(ctx, len(items))
+	eventItems, eventsTruncated, err := lf.collectEventTimelineItems(ctx, len(items))
 	if err != nil {
 		return err
 	}
@@ -74,6 +74,12 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	// the user that the log stream could not be read.
 	if logErr != nil {
 		if _, err := fmt.Fprintf(lf.Writer, "[notice] container logs unavailable: %s\n", terminal.Sanitize(logErr.Error())); err != nil {
+			return fmt.Errorf("error writing timeline notice: %w", err)
+		}
+	}
+	// Make event-list truncation visible rather than silently dropping events.
+	if eventsTruncated {
+		if _, err := fmt.Fprintf(lf.Writer, "[notice] event list truncated to the first %d events\n", maxTimelineEvents); err != nil {
 			return fmt.Errorf("error writing timeline notice: %w", err)
 		}
 	}
@@ -176,7 +182,9 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 	return items, nil
 }
 
-func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset int) ([]timelineItem, error) {
+// collectEventTimelineItems returns the timeline items for this pod's events and
+// reports whether the server-side list was truncated by the result limit.
+func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset int) ([]timelineItem, bool, error) {
 	// Scope the server-side query to events for this pod: this avoids reading the
 	// whole namespace's events (which leaks unrelated workloads, needs broad RBAC,
 	// and floods the timeline) and bounds the result size.
@@ -186,7 +194,7 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 	}
 	events, err := lf.Clientset.CoreV1().Events(lf.Namespace).List(ctx, listOpts)
 	if err != nil {
-		return nil, fmt.Errorf("error listing events: %w", err)
+		return nil, false, fmt.Errorf("error listing events: %w", err)
 	}
 
 	var items []timelineItem
@@ -203,7 +211,9 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 			line:      formatTimelineEvent(timelineEvent),
 		})
 	}
-	return items, nil
+	// A non-empty Continue token means more events matched than the limit returned.
+	truncated := events.Continue != ""
+	return items, truncated, nil
 }
 
 func newTimelineEvent(event corev1.Event) timelineEvent {

@@ -691,6 +691,49 @@ func TestLogFetcher_GetTimelineShowsEventsWhenLogsUnavailable(t *testing.T) {
 	}
 }
 
+func TestLogFetcher_GetTimelineNotesTruncatedEvents(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte("")}, nil
+	})
+	// Simulate a server-side truncated event list by returning a Continue token.
+	clientset.PrependReactor("list", "events", func(clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &corev1.EventList{
+			ListMeta: metav1.ListMeta{Continue: "more-events"},
+			Items: []corev1.Event{
+				*testPodEvent("test-pod", "Warning", "BackOff", "Back-off restarting failed container", "2026-05-15T00:38:05Z"),
+			},
+		}, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "app-image"}},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create test pod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.WARN
+
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "[notice] event list truncated") {
+		t.Fatalf("timeline missing truncation notice: %q", got)
+	}
+	if !strings.Contains(got, "Back-off restarting failed container") {
+		t.Fatalf("timeline missing the events it did fetch: %q", got)
+	}
+}
+
 func TestFormatTimelineEventHandlesUnknownType(t *testing.T) {
 	event := newTimelineEvent(*testEvent("Pod", "test-pod", "Critical", "NodePressure", "node is under pressure", "2026-05-15T00:38:07Z"))
 
