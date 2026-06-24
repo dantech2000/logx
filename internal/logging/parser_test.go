@@ -147,6 +147,24 @@ func TestParseLogEntryBracketedStructuredText(t *testing.T) {
 	}
 }
 
+func TestParseLogEntryKeepsURLInMessage(t *testing.T) {
+	// A trailing URL containing a query string must not be mistaken for a
+	// key=value field and stripped out of the message.
+	input := "[2026-05-15 00:38:05] [INFO] [api] proxying request to /v1/items?page=2 status=200"
+
+	got := ParseLogEntry(input)
+
+	if got.Message != "proxying request to /v1/items?page=2" {
+		t.Errorf("Message = %q, want the URL preserved", got.Message)
+	}
+	if got.Fields["status"] != "200" {
+		t.Errorf("Fields[status] = %v, want %q", got.Fields["status"], "200")
+	}
+	if _, ok := got.Fields["/v1/items?page"]; ok {
+		t.Errorf("URL query param was wrongly extracted as a field: %v", got.Fields)
+	}
+}
+
 func TestParseLogEntryLogfmt(t *testing.T) {
 	input := `time=2026-05-15T00:38:05Z level=info component=worker msg="job completed" job_id=abc123 duration_ms=42`
 

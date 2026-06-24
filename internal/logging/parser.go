@@ -98,6 +98,9 @@ var (
 	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s+(.*)$`)
 	plainTextTimestampRegex        = regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
 	plainTextLevelRegex            = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)([^[:alnum:]_]|$)`)
+	// logfmtKeyRegex matches identifier-like logfmt keys so that tokens such as a
+	// trailing URL ("…/api?foo=bar") are not mistaken for key=value fields.
+	logfmtKeyRegex = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
 
 var httpContextFields = buildStringSet([]string{
@@ -445,7 +448,9 @@ func isSimpleField(value string) bool {
 	if !ok || key == "" || fieldValue == "" {
 		return false
 	}
-	return !strings.ContainsAny(key, " \t")
+	// Only treat identifier-like keys as fields; this keeps URLs and paths that
+	// happen to contain '=' (e.g. query strings) inside the message text.
+	return logfmtKeyRegex.MatchString(key)
 }
 
 func parseLogfmtFields(line string) (map[string]interface{}, bool) {
