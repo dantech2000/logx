@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dantech2000/logx/pkg/kubernetes"
-	"github.com/dantech2000/logx/pkg/terminal"
+	"github.com/dantech2000/logx/internal/kubernetes"
+	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
 )
 

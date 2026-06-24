@@ -18,9 +18,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/dantech2000/logx/pkg/version.version={{.Version}}
-      - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
-      - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
+      - -X github.com/dantech2000/logx/internal/version.version={{.Version}}
+      - -X github.com/dantech2000/logx/internal/version.commitHash={{.Commit}}
+      - -X github.com/dantech2000/logx/internal/version.buildDate={{.Date}}
     main: ./main.go
   - id: kubectl-logx
     binary: kubectl-logx
@@ -35,9 +35,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/dantech2000/logx/pkg/version.version={{.Version}}
-      - -X github.com/dantech2000/logx/pkg/version.commitHash={{.Commit}}
-      - -X github.com/dantech2000/logx/pkg/version.buildDate={{.Date}}
+      - -X github.com/dantech2000/logx/internal/version.version={{.Version}}
+      - -X github.com/dantech2000/logx/internal/version.commitHash={{.Commit}}
+      - -X github.com/dantech2000/logx/internal/version.buildDate={{.Date}}
     main: ./main.go
 
 archives:

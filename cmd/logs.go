@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dantech2000/logx/pkg/kubernetes"
-	"github.com/dantech2000/logx/pkg/logging"
+	"github.com/dantech2000/logx/internal/kubernetes"
+	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

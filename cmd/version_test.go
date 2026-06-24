@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dantech2000/logx/pkg/version"
+	"github.com/dantech2000/logx/internal/version"
 	"gopkg.in/yaml.v2"
 )
 

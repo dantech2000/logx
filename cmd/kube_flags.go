@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dantech2000/logx/pkg/kubernetes"
+	"github.com/dantech2000/logx/internal/kubernetes"
 	"github.com/spf13/cobra"
 	k8skubernetes "k8s.io/client-go/kubernetes"
 )

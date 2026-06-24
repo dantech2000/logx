@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dantech2000/logx/pkg/format"
-	"github.com/dantech2000/logx/pkg/kubernetes"
+	"github.com/dantech2000/logx/internal/format"
+	"github.com/dantech2000/logx/internal/kubernetes"
 	"github.com/spf13/cobra"
 )
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dantech2000/logx/pkg/logging"
-	"github.com/dantech2000/logx/pkg/terminal"
+	"github.com/dantech2000/logx/internal/logging"
+	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

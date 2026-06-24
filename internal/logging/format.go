@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dantech2000/logx/pkg/terminal"
+	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
 )
 

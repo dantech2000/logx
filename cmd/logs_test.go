@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/dantech2000/logx/pkg/logging"
+	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
 )
 

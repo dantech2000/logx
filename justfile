@@ -12,7 +12,7 @@ build:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.version=${VERSION} -X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
+    LDFLAGS="-X github.com/dantech2000/logx/internal/version.version=${VERSION} -X github.com/dantech2000/logx/internal/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/internal/version.buildDate=${BUILD_DATE}"
     go build -ldflags "${LDFLAGS}" -o bin/logx main.go
     go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx main.go
 
@@ -29,7 +29,7 @@ cross-compile:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.version=${VERSION} -X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
+    LDFLAGS="-X github.com/dantech2000/logx/internal/version.version=${VERSION} -X github.com/dantech2000/logx/internal/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/internal/version.buildDate=${BUILD_DATE}"
     
     GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/logx-linux-amd64 main.go
     GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx-linux-amd64 main.go

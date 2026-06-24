@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dantech2000/logx/pkg/kubernetes"
+	"github.com/dantech2000/logx/internal/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"

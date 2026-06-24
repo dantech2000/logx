@@ -6,7 +6,7 @@ import (
 	"io"
 	"runtime"
 
-	"github.com/dantech2000/logx/pkg/version"
+	"github.com/dantech2000/logx/internal/version"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 )
