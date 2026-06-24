@@ -32,14 +32,14 @@ Example usage:
 
 func init() {
 	rootCmd.AddCommand(containersCmd)
-	containersCmd.Flags().StringP("output", "o", "", "Output format: json, yaml, or posix")
+	containersCmd.Flags().StringP(flagOutput, "o", "", "Output format: json, yaml, or posix")
 
 	// Add completion for pod names
 	containersCmd.ValidArgsFunction = completePodNames
 }
 
 func getContainerOptions(cmd *cobra.Command, args []string) (*containerOptions, error) {
-	outputFormat, err := cmd.Flags().GetString("output")
+	outputFormat, err := cmd.Flags().GetString(flagOutput)
 	if err != nil {
 		return nil, fmt.Errorf("error getting output format flag: %w", err)
 	}

@@ -9,23 +9,23 @@ import (
 )
 
 func addKubeFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringP("namespace", "n", "", "Kubernetes namespace (defaults to current context's namespace)")
-	cmd.PersistentFlags().String("context", "", "Kubernetes context to use")
-	cmd.PersistentFlags().String("kubeconfig", "", "Path to the kubeconfig file")
+	cmd.PersistentFlags().StringP(flagNamespace, "n", "", "Kubernetes namespace (defaults to current context's namespace)")
+	cmd.PersistentFlags().String(flagContext, "", "Kubernetes context to use")
+	cmd.PersistentFlags().String(flagKubeconfig, "", "Path to the kubeconfig file")
 }
 
 func kubeOptionsFromFlags(cmd *cobra.Command) (kubernetes.ClientOptions, error) {
-	namespace, err := cmd.Flags().GetString("namespace")
+	namespace, err := cmd.Flags().GetString(flagNamespace)
 	if err != nil {
 		return kubernetes.ClientOptions{}, fmt.Errorf("error getting namespace flag: %w", err)
 	}
 
-	contextName, err := cmd.Flags().GetString("context")
+	contextName, err := cmd.Flags().GetString(flagContext)
 	if err != nil {
 		return kubernetes.ClientOptions{}, fmt.Errorf("error getting context flag: %w", err)
 	}
 
-	kubeconfig, err := cmd.Flags().GetString("kubeconfig")
+	kubeconfig, err := cmd.Flags().GetString(flagKubeconfig)
 	if err != nil {
 		return kubernetes.ClientOptions{}, fmt.Errorf("error getting kubeconfig flag: %w", err)
 	}

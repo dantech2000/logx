@@ -51,8 +51,8 @@ or specify an output format using the --output flag.`,
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
-	versionCmd.Flags().BoolP("short", "s", false, "Print just the version number")
-	versionCmd.Flags().StringP("output", "o", "", "Output format (json or yaml)")
+	versionCmd.Flags().BoolP(flagShort, "s", false, "Print just the version number")
+	versionCmd.Flags().StringP(flagOutput, "o", "", "Output format (json or yaml)")
 }
 
 func getVersionData(version version.Version) versionData {
@@ -67,8 +67,8 @@ func getVersionData(version version.Version) versionData {
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	short, _ := cmd.Flags().GetBool("short")
-	output, _ := cmd.Flags().GetString("output")
+	short, _ := cmd.Flags().GetBool(flagShort)
+	output, _ := cmd.Flags().GetString(flagOutput)
 
 	return writeVersion(cmd.OutOrStdout(), version.CurrentVersion, short, output)
 }

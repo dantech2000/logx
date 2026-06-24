@@ -36,15 +36,15 @@ func init() {
 	// Add completion for pod names
 	logsCmd.ValidArgsFunction = completePodNames
 	// Add completion for container names
-	_ = logsCmd.RegisterFlagCompletionFunc("container", completeContainerNames)
+	_ = logsCmd.RegisterFlagCompletionFunc(flagContainer, completeContainerNames)
 }
 
 func addLogFlags(cmd *cobra.Command) {
-	cmd.Flags().StringP("container", "c", "", "Specific container name within the pod")
-	cmd.Flags().BoolP("follow", "f", false, "Follow the log output in real-time")
-	cmd.Flags().StringP("level", "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
-	cmd.Flags().BoolP("previous", "p", false, "Get previous terminated container logs")
-	cmd.Flags().Bool("timeline", false, "Show pod logs and Kubernetes events together sorted by time")
+	cmd.Flags().StringP(flagContainer, "c", "", "Specific container name within the pod")
+	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
+	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
+	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
+	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -99,27 +99,27 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 }
 
 func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
-	container, err := cmd.Flags().GetString("container")
+	container, err := cmd.Flags().GetString(flagContainer)
 	if err != nil {
 		return nil, fmt.Errorf("error getting container flag: %w", err)
 	}
 
-	follow, err := cmd.Flags().GetBool("follow")
+	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
 	}
 
-	level, err := cmd.Flags().GetString("level")
+	level, err := cmd.Flags().GetString(flagLevel)
 	if err != nil {
 		return nil, fmt.Errorf("error getting level flag: %w", err)
 	}
 
-	previous, err := cmd.Flags().GetBool("previous")
+	previous, err := cmd.Flags().GetBool(flagPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("error getting previous flag: %w", err)
 	}
 
-	timeline, err := cmd.Flags().GetBool("timeline")
+	timeline, err := cmd.Flags().GetBool(flagTimeline)
 	if err != nil {
 		return nil, fmt.Errorf("error getting timeline flag: %w", err)
 	}
