@@ -18,23 +18,10 @@ func ContainerList(podName, namespace string, containers []kubernetes.ContainerI
 		color.CyanString(terminal.Sanitize(podName)),
 		color.CyanString(terminal.Sanitize(namespace)))
 
-	// Write containers
+	// Write containers, reusing the single-row formatter so the row layout and
+	// sanitization live in exactly one place.
 	for _, container := range containers {
-		statusColor := color.New(color.FgRed)
-		if container.Ready {
-			statusColor = color.New(color.FgGreen)
-		}
-
-		readySymbol := "✗"
-		if container.Ready {
-			readySymbol = "✓"
-		}
-
-		fmt.Fprintf(&sb, "%s %s [%s] (%s)\n",
-			statusColor.Sprint(readySymbol),
-			terminal.Sanitize(container.Name),
-			terminal.Sanitize(container.Status),
-			terminal.Sanitize(container.Image))
+		fmt.Fprintln(&sb, kubernetes.FormatContainerInfo(container))
 	}
 
 	return sb.String()
