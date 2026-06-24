@@ -680,7 +680,9 @@ func TestLogFetcher_GetTimelineShowsEventsWhenLogsUnavailable(t *testing.T) {
 	}
 
 	got := buf.String()
+	// The user is told logs were unavailable, then sees the explanatory events.
 	assertInOrder(t, got, []string{
+		"[notice] container logs unavailable:",
 		"[2026-05-20 23:42:03] [EVENT] [Normal] pod/sample-imagepull-app-59dd994c59-bhtlt BackOff: Back-off pulling image",
 		"[2026-05-20 23:42:03] [EVENT] [Warning] pod/sample-imagepull-app-59dd994c59-bhtlt Failed: Error: ImagePullBackOff",
 	})

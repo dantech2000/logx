@@ -70,6 +70,15 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	}
 	items = append(items, eventItems...)
 
+	// Logs failed but events are available: degrade gracefully (events often
+	// explain why logs are missing, e.g. ImagePullBackOff) while still telling
+	// the user that the log stream could not be read.
+	if logErr != nil {
+		if _, err := fmt.Fprintf(lf.Writer, "[notice] container logs unavailable: %s\n", terminal.Sanitize(logErr.Error())); err != nil {
+			return fmt.Errorf("error writing timeline notice: %w", err)
+		}
+	}
+
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := items[i], items[j]
 		if left.timestamp.IsZero() && right.timestamp.IsZero() {
