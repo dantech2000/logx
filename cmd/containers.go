@@ -43,7 +43,7 @@ func init() {
 func getContainerOptions(cmd *cobra.Command, args []string) (*containerOptions, error) {
 	outputFormat, err := cmd.Flags().GetString("output")
 	if err != nil {
-		return nil, fmt.Errorf("error getting output format flag: %v", err)
+		return nil, fmt.Errorf("error getting output format flag: %w", err)
 	}
 
 	return &containerOptions{

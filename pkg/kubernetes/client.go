@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// DefaultNamespace is the namespace used when none is specified.
 const DefaultNamespace = "default"
 
 // ClientOptions describes kubeconfig overrides used to create a Kubernetes client.

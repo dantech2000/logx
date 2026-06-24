@@ -28,7 +28,7 @@ type logFilterCase struct {
 func TestLogFetcher_GetLogs(t *testing.T) {
 	// Create a fake clientset
 	clientset := fake.NewSimpleClientset()
-	clientset.Fake.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		if action.GetSubresource() == "log" {
 			return true, &runtime.Unknown{Raw: []byte("fake logs")}, nil
 		}
@@ -291,7 +291,7 @@ func assertOutputContains(t *testing.T, got string, expected []string, hidden []
 func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	var gotOptions *corev1.PodLogOptions
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		genericAction, ok := action.(clientgotesting.GenericAction)
 		if !ok {
 			t.Fatalf("expected GenericAction, got %T", action)
@@ -406,7 +406,7 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 		"2026-05-15T00:38:04Z ERROR request failed",
 	}, "\n")
 	clientset := fake.NewSimpleClientset()
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, &runtime.Unknown{Raw: []byte(logs)}, nil
 	})
 
@@ -464,11 +464,10 @@ func TestLogFetcher_GetTimelineMatchesGoldenFixture(t *testing.T) {
 
 	pod := readPodFixture(t, "testdata/pods/single-container.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, &runtime.Unknown{Raw: logs}, nil
 	})
 	for _, event := range readEventListFixture(t, "testdata/timeline/events.yaml").Items {
-		event := event
 		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create event: %v", err)
 		}
@@ -495,11 +494,10 @@ func TestLogFetcher_GetTimelineIncludesRealNamespaceEvents(t *testing.T) {
 
 	pod := readPodFixture(t, "testdata/real-traefik/pod.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, &runtime.Unknown{Raw: logs}, nil
 	})
 	for _, event := range readEventListFixture(t, "testdata/real-traefik/events.yaml").Items {
-		event := event
 		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create event: %v", err)
 		}
@@ -537,11 +535,10 @@ func TestLogFetcher_GetTimelineOrdersRealPlainFrameworkLogs(t *testing.T) {
 
 	pod := readPodFixture(t, "testdata/real-portal/pod.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, &runtime.Unknown{Raw: logs}, nil
 	})
 	for _, event := range readEventListFixture(t, "testdata/real-portal/events.yaml").Items {
-		event := event
 		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create event: %v", err)
 		}
@@ -577,11 +574,10 @@ func TestLogFetcher_GetTimelineParsesRealRailsLogs(t *testing.T) {
 
 	pod := readPodFixture(t, "testdata/real-rails/pod.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, &runtime.Unknown{Raw: logs}, nil
 	})
 	for _, event := range readEventListFixture(t, "testdata/real-rails/events.yaml").Items {
-		event := event
 		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create event: %v", err)
 		}
@@ -617,11 +613,10 @@ func TestLogFetcher_GetTimelineParsesRealRailsLogs(t *testing.T) {
 func TestLogFetcher_GetTimelineShowsEventsWhenLogsUnavailable(t *testing.T) {
 	pod := readPodFixture(t, "testdata/real-imagepull/pod.yaml")
 	clientset := fake.NewSimpleClientset(pod)
-	clientset.Fake.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("container %q in pod %q is waiting to start: trying and failing to pull image", "sample-imagepull-app", pod.Name)
 	})
 	for _, event := range readEventListFixture(t, "testdata/real-imagepull/events.yaml").Items {
-		event := event
 		if _, err := clientset.CoreV1().Events(event.Namespace).Create(context.Background(), &event, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create event: %v", err)
 		}
@@ -722,7 +717,7 @@ func newTestLogFetcher(t *testing.T, logs string, writer *bytes.Buffer) *LogFetc
 	t.Helper()
 
 	clientset := fake.NewSimpleClientset()
-	clientset.Fake.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	clientset.PrependReactor("get", "pods", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		if action.GetSubresource() == "log" {
 			return true, &runtime.Unknown{Raw: []byte(logs)}, nil
 		}

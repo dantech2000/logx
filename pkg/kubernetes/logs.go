@@ -4,6 +4,7 @@ package kubernetes
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -62,9 +63,10 @@ func (lf *LogFetcher) getSingleContainerName() (string, error) {
 	}
 
 	containerCount := len(pod.Spec.Containers)
-	if containerCount == 0 {
+	switch containerCount {
+	case 0:
 		return "", fmt.Errorf("no containers found in pod %s", lf.PodName)
-	} else if containerCount == 1 {
+	case 1:
 		return pod.Spec.Containers[0].Name, nil
 	}
 
@@ -101,7 +103,7 @@ func (lf *LogFetcher) getSingleContainerName() (string, error) {
 	// Show the prompt and get user's selection
 	err = survey.AskOne(prompt, &selectedIdx, survey.WithPageSize(10))
 	if err != nil {
-		if err == terminal.InterruptErr {
+		if errors.Is(err, terminal.InterruptErr) {
 			return "", fmt.Errorf("operation cancelled")
 		}
 		return "", fmt.Errorf("selection failed: %w", err)
@@ -176,7 +178,7 @@ func (lf *LogFetcher) GetLogs() error {
 	if err != nil {
 		return fmt.Errorf("error opening log stream: %w", err)
 	}
-	defer podLogs.Close()
+	defer func() { _ = podLogs.Close() }()
 
 	// Create a scanner to read logs line by line
 	scanner := bufio.NewScanner(podLogs)

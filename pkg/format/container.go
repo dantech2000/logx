@@ -9,14 +9,14 @@ import (
 	"github.com/fatih/color"
 )
 
-// FormatContainerList formats the container list in a uniform way
-func FormatContainerList(podName, namespace string, containers []kubernetes.ContainerInfo) string {
+// ContainerList formats the container list in a uniform way
+func ContainerList(podName, namespace string, containers []kubernetes.ContainerInfo) string {
 	var sb strings.Builder
 
 	// Write header
-	sb.WriteString(fmt.Sprintf("\nPod: %s\nNamespace: %s\n\n",
+	fmt.Fprintf(&sb, "\nPod: %s\nNamespace: %s\n\n",
 		color.CyanString(terminal.Sanitize(podName)),
-		color.CyanString(terminal.Sanitize(namespace))))
+		color.CyanString(terminal.Sanitize(namespace)))
 
 	// Write containers
 	for _, container := range containers {
@@ -30,11 +30,11 @@ func FormatContainerList(podName, namespace string, containers []kubernetes.Cont
 			readySymbol = "✓"
 		}
 
-		sb.WriteString(fmt.Sprintf("%s %s [%s] (%s)\n",
+		fmt.Fprintf(&sb, "%s %s [%s] (%s)\n",
 			statusColor.Sprint(readySymbol),
 			terminal.Sanitize(container.Name),
 			terminal.Sanitize(container.Status),
-			terminal.Sanitize(container.Image)))
+			terminal.Sanitize(container.Image))
 	}
 
 	return sb.String()

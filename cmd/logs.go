@@ -108,27 +108,27 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 	container, err := cmd.Flags().GetString("container")
 	if err != nil {
-		return nil, fmt.Errorf("error getting container flag: %v", err)
+		return nil, fmt.Errorf("error getting container flag: %w", err)
 	}
 
 	follow, err := cmd.Flags().GetBool("follow")
 	if err != nil {
-		return nil, fmt.Errorf("error getting follow flag: %v", err)
+		return nil, fmt.Errorf("error getting follow flag: %w", err)
 	}
 
 	level, err := cmd.Flags().GetString("level")
 	if err != nil {
-		return nil, fmt.Errorf("error getting level flag: %v", err)
+		return nil, fmt.Errorf("error getting level flag: %w", err)
 	}
 
 	previous, err := cmd.Flags().GetBool("previous")
 	if err != nil {
-		return nil, fmt.Errorf("error getting previous flag: %v", err)
+		return nil, fmt.Errorf("error getting previous flag: %w", err)
 	}
 
 	timeline, err := cmd.Flags().GetBool("timeline")
 	if err != nil {
-		return nil, fmt.Errorf("error getting timeline flag: %v", err)
+		return nil, fmt.Errorf("error getting timeline flag: %w", err)
 	}
 
 	return &logOptions{
@@ -153,7 +153,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
-		return fmt.Errorf("error getting kubernetes client: %v", err)
+		return fmt.Errorf("error getting kubernetes client: %w", err)
 	}
 
 	// Create log fetcher with the new interface
@@ -178,7 +178,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		err = logFetcher.GetLogs()
 	}
 	if err != nil {
-		return fmt.Errorf("error fetching logs: %v", err)
+		return fmt.Errorf("error fetching logs: %w", err)
 	}
 
 	return nil

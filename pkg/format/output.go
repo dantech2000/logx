@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// OutputFormatter renders a pod's container list in a selectable output format
+// (table, json, yaml, or posix).
 type OutputFormatter struct {
 	PodName    string
 	Namespace  string
@@ -34,7 +36,7 @@ func (of *OutputFormatter) FormatOutput(format string) (string, error) {
 	case "posix":
 		return of.formatPOSIX()
 	default:
-		return FormatContainerList(of.PodName, of.Namespace, of.Containers), nil
+		return ContainerList(of.PodName, of.Namespace, of.Containers), nil
 	}
 }
 

@@ -3,6 +3,7 @@ package logging
 // LogLevel represents the severity of a log entry
 type LogLevel int
 
+// Log severity levels in increasing order of importance.
 const (
 	DEBUG LogLevel = iota
 	INFO

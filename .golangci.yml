@@ -1,0 +1,33 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose      # checks HTTP/response bodies are closed
+    - errorlint      # enforce errors.Is/As over == and %w wrapping
+    - copyloopvar    # detect unnecessary loop-var copies
+    - gocyclo        # flag overly complex functions
+    - misspell       # catch common misspellings
+    - revive         # broad style/lint rules (golint successor)
+    - unconvert      # remove redundant type conversions
+    - unparam        # report unused function parameters
+  settings:
+    gocyclo:
+      min-complexity: 20
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+  exclusions:
+    rules:
+      # Tests may ignore errors and use higher complexity for table setups.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocyclo
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

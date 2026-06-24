@@ -28,6 +28,8 @@ var (
 
 var jsonFormattedFieldExclusions = buildStringSet(jsonLevelFields, jsonTimeFields)
 
+// FormatLogEntry renders a parsed log entry as a single colorized line with an
+// optional timestamp, level label, logger, and message/field details.
 func FormatLogEntry(entry LogEntry) string {
 	var parts []string
 
@@ -45,6 +47,7 @@ func FormatLogEntry(entry LogEntry) string {
 	return strings.Join(parts, " ")
 }
 
+// FormatLogLevelLabel returns the colorized bracketed label for a log level.
 func FormatLogLevelLabel(level LogLevel) string {
 	levelColor, ok := logLevelColors[level]
 	if !ok {
@@ -53,6 +56,8 @@ func FormatLogLevelLabel(level LogLevel) string {
 	return levelColor.Sprint(fmt.Sprintf("[%s]", level))
 }
 
+// FormatLogEntryDetails renders the message and structured fields of an entry,
+// dispatching on its detected format.
 func FormatLogEntryDetails(entry LogEntry) string {
 	if entry.Format == FormatJSON {
 		return formatJSONDetails(entry)
@@ -139,17 +144,7 @@ func sortedKeys(data map[string]interface{}) []string {
 func formatValue(v interface{}) string {
 	switch val := v.(type) {
 	case string:
-		val = terminal.Sanitize(val)
-		if val == "" {
-			return quoteColor.Sprint(`""`)
-		}
-		if strings.ContainsAny(val, " =,\"'[]{}()") {
-			return fmt.Sprintf("%s%s%s",
-				quoteColor.Sprint(`"`),
-				valueColor.Sprint(val),
-				quoteColor.Sprint(`"`))
-		}
-		return valueColor.Sprint(val)
+		return formatStringValue(val)
 	case nil:
 		return quoteColor.Sprint("null")
 	case bool:
@@ -165,32 +160,8 @@ func formatValue(v interface{}) string {
 	case float32:
 		return formatValue(float64(val))
 	case json.Number:
-		if _, err := val.Int64(); err == nil {
-			return valueColor.Sprint(val.String())
-		}
-		if parsedValue, err := val.Float64(); err == nil {
-			return valueColor.Sprintf("%.2f", parsedValue)
-		}
-		return valueColor.Sprint(terminal.Sanitize(val.String()))
-	case int:
-		return valueColor.Sprintf("%d", val)
-	case int8:
-		return valueColor.Sprintf("%d", val)
-	case int16:
-		return valueColor.Sprintf("%d", val)
-	case int32:
-		return valueColor.Sprintf("%d", val)
-	case int64:
-		return valueColor.Sprintf("%d", val)
-	case uint:
-		return valueColor.Sprintf("%d", val)
-	case uint8:
-		return valueColor.Sprintf("%d", val)
-	case uint16:
-		return valueColor.Sprintf("%d", val)
-	case uint32:
-		return valueColor.Sprintf("%d", val)
-	case uint64:
+		return formatJSONNumber(val)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return valueColor.Sprintf("%d", val)
 	case map[string]interface{}:
 		parts := make([]string, 0, len(val))
@@ -209,4 +180,32 @@ func formatValue(v interface{}) string {
 	default:
 		return valueColor.Sprint(terminal.Sanitize(fmt.Sprintf("%v", val)))
 	}
+}
+
+// formatStringValue sanitizes and colorizes a string value, quoting it when it
+// contains characters that would be ambiguous in unquoted logfmt output.
+func formatStringValue(val string) string {
+	val = terminal.Sanitize(val)
+	if val == "" {
+		return quoteColor.Sprint(`""`)
+	}
+	if strings.ContainsAny(val, " =,\"'[]{}()") {
+		return fmt.Sprintf("%s%s%s",
+			quoteColor.Sprint(`"`),
+			valueColor.Sprint(val),
+			quoteColor.Sprint(`"`))
+	}
+	return valueColor.Sprint(val)
+}
+
+// formatJSONNumber renders a json.Number as an integer when possible, otherwise
+// as a two-decimal float, falling back to its sanitized string form.
+func formatJSONNumber(val json.Number) string {
+	if _, err := val.Int64(); err == nil {
+		return valueColor.Sprint(val.String())
+	}
+	if parsedValue, err := val.Float64(); err == nil {
+		return valueColor.Sprintf("%.2f", parsedValue)
+	}
+	return valueColor.Sprint(terminal.Sanitize(val.String()))
 }

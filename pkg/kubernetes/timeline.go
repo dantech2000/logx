@@ -142,7 +142,7 @@ func (lf *LogFetcher) collectLogTimelineItems() ([]timelineItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error opening log stream: %w", err)
 	}
-	defer podLogs.Close()
+	defer func() { _ = podLogs.Close() }()
 
 	var items []timelineItem
 	scanner := bufio.NewScanner(podLogs)

@@ -12,6 +12,7 @@ import (
 // LogFormat represents different log formats we can handle
 type LogFormat int
 
+// Recognized log line formats.
 const (
 	FormatPlainText LogFormat = iota
 	FormatJSON
@@ -535,6 +536,8 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 	return current, true
 }
 
+// ParseLogEntry parses a single log line, trying each known format parser in
+// order and falling back to plain-text parsing if none match.
 func ParseLogEntry(line string) LogEntry {
 	for _, parser := range logParsers {
 		if entry, ok := parser.Parse(line); ok {
@@ -544,6 +547,9 @@ func ParseLogEntry(line string) LogEntry {
 	return parsePlainTextLog(line)
 }
 
+// ParseKubernetesLogEntry parses a log line that may carry a kubelet RFC3339
+// timestamp prefix (as emitted with --timestamps), using that timestamp when
+// present and otherwise delegating to ParseLogEntry.
 func ParseKubernetesLogEntry(line string) LogEntry {
 	if timestamp, payload, ok := splitKubernetesTimestampPrefix(line); ok {
 		entry := ParseLogEntry(payload)
