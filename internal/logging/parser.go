@@ -542,6 +542,14 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 
 // ParseLogEntry parses a single log line, trying each known format parser in
 // order and falling back to plain-text parsing if none match.
+//
+// Parsing is intentionally stateless and line-oriented: each line is classified
+// independently. A consequence is that continuation lines of a multi-line entry
+// (e.g. the body of a Java/Go stack trace) carry no level of their own and are
+// classified as DEBUG, so they are hidden when filtering at a higher --level
+// even when the preceding header line is an ERROR. Grouping continuation lines
+// with their parent entry would require stateful, format-specific heuristics and
+// is left as a deliberate future enhancement rather than a fragile guess.
 func ParseLogEntry(line string) LogEntry {
 	for _, parser := range logParsers {
 		if entry, ok := parser.Parse(line); ok {
