@@ -1,0 +1,5 @@
+[2026-05-15 00:38:02] [ERROR] request failed id=req-123
+[ERROR] at example.service.Client.call(Client.java:42)
+[ERROR] at example.api.Handler.handle(Handler.java:87)
+[2026-05-15 00:38:03] [WARN] retry scheduled id=req-123
+[WARN] retry attempt 2 in 500ms

@@ -1,4 +1,6 @@
-set dotenv-load
+# Note: .env is intentionally NOT auto-loaded for every recipe; only
+# `release-goreleaser` needs it and sources it explicitly, so secrets are not
+# exported into unrelated tasks.
 
 # List available commands
 default:
@@ -10,7 +12,7 @@ build:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.version=${VERSION} -X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
+    LDFLAGS="-X github.com/dantech2000/logx/internal/version.version=${VERSION} -X github.com/dantech2000/logx/internal/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/internal/version.buildDate=${BUILD_DATE}"
     go build -ldflags "${LDFLAGS}" -o bin/logx main.go
     go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx main.go
 
@@ -18,15 +20,8 @@ build:
 test:
     go test ./...
 
-# Build with version information
-build-version:
-    #!/usr/bin/env bash
-    VERSION=$(git describe --tags --always --dirty)
-    COMMIT_HASH=$(git rev-parse --short HEAD)
-    BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.version=${VERSION} -X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
-    go build -ldflags "${LDFLAGS}" -o bin/logx main.go
-    go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx main.go
+# Alias kept for compatibility: `build` already embeds version information.
+alias build-version := build
 
 # Cross-compile for multiple platforms
 cross-compile:
@@ -34,7 +29,7 @@ cross-compile:
     VERSION=$(git describe --tags --always --dirty)
     COMMIT_HASH=$(git rev-parse --short HEAD)
     BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    LDFLAGS="-X github.com/dantech2000/logx/pkg/version.version=${VERSION} -X github.com/dantech2000/logx/pkg/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/pkg/version.buildDate=${BUILD_DATE}"
+    LDFLAGS="-X github.com/dantech2000/logx/internal/version.version=${VERSION} -X github.com/dantech2000/logx/internal/version.commitHash=${COMMIT_HASH} -X github.com/dantech2000/logx/internal/version.buildDate=${BUILD_DATE}"
     
     GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/logx-linux-amd64 main.go
     GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o bin/kubectl-logx-linux-amd64 main.go

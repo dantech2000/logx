@@ -4,13 +4,14 @@
 
 ## Features
 
-- Smart log parsing for JSON and plain-text logs
+- Smart log parsing for JSON, logfmt, bracketed, klog/glog, common/combined and Envoy access logs, syslog priority, and plain-text logs
 - Timestamp and log-level detection
 - Colorized, readable output
-- Multi-container pod support with interactive selection
+- Multi-container pod support with interactive selection, including init and ephemeral containers
 - Previous container logs with `-p`
 - Live log following with `-f`
 - Container listing with JSON, YAML, and POSIX output
+- Parsing logs from a file or stdin (no cluster needed) via `logx parse`
 
 ## Installation
 
@@ -135,11 +136,16 @@ kubectl logx my-pod -n my-namespace -c my-container --timeline -l WARN
 Example output:
 
 ```text
-[2026-05-15 00:38:01] [EVENT] [Normal] Scheduled: Successfully assigned default/my-pod
-[2026-05-15 00:38:03] [EVENT] [Warning] Unhealthy: Readiness probe failed
+[2026-05-15 00:38:01] [EVENT] [Normal] pod/my-pod Scheduled: Successfully assigned default/my-pod
+[2026-05-15 00:38:03] [EVENT] [Warning] pod/my-pod Unhealthy: Readiness probe failed
 [2026-05-15 00:38:04] [LOG] [ERROR] request failed
-[2026-05-15 00:38:05] [EVENT] [Warning] BackOff: Back-off restarting failed container
+[2026-05-15 00:38:05] [EVENT] [Warning] pod/my-pod BackOff: Back-off restarting failed container (x3)
 ```
+
+Only events for the target pod are shown. Repeated events are annotated with
+their occurrence count (e.g. `(x3)`). If logs cannot be read but events are
+available (such as `ImagePullBackOff`), the events are still shown with a
+`[notice]` explaining that logs were unavailable.
 
 `--timeline` is intended for point-in-time troubleshooting and cannot be combined with `--follow`.
 
@@ -156,6 +162,19 @@ logx containers my-pod -o json
 logx containers my-pod -o yaml
 logx containers my-pod -o posix
 ```
+
+Parse logs from a file or stdin (no cluster required):
+
+```bash
+logx parse app.log
+logx parse app.log -l WARN
+kubectl logs my-pod | logx parse -l ERROR
+cat app.log | logx parse
+```
+
+`parse` runs the same parsing, multi-line grouping, and `--level` filtering as
+`logx logs`, so it is handy for inspecting captured logs or piping output from
+other tools. It also understands a leading `kubectl logs --timestamps` prefix.
 
 Version information:
 
