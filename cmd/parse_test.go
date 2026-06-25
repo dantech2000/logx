@@ -143,3 +143,33 @@ func TestRunParseRejectsBadRegex(t *testing.T) {
 		t.Fatal("expected an error for an invalid --grep regex")
 	}
 }
+
+func TestRunParseWhereAndFields(t *testing.T) {
+	const sample = `{"level":"info","status":200,"path":"/ok","msg":"served"}
+{"level":"error","status":503,"path":"/api","msg":"upstream down"}
+{"level":"warn","status":404,"path":"/missing","msg":"not found"}
+`
+	// --where status>=500 keeps only the 503 line; --fields projects columns.
+	var buf bytes.Buffer
+	cmd := newParseCmd(strings.NewReader(sample), &buf)
+	cmd.SetArgs([]string{"--where", "status>=500", "--fields", "level,status,msg"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("parse --where --fields error = %v", err)
+	}
+	got := strings.TrimRight(buf.String(), "\n")
+	if strings.Contains(got, "200") || strings.Contains(got, "404") {
+		t.Fatalf("--where leaked non-matching rows:\n%s", got)
+	}
+	if got != `level=ERROR status=503 msg="upstream down"` {
+		t.Fatalf("projected output = %q", got)
+	}
+}
+
+func TestRunParseRejectsBadWhere(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := newParseCmd(strings.NewReader("INFO x\n"), &buf)
+	cmd.SetArgs([]string{"--where", "noop"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected an error for a --where expression with no operator")
+	}
+}

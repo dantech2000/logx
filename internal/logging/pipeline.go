@@ -36,6 +36,11 @@ type PipelineOptions struct {
 	// Highlight, when true, reverse-video-highlights the Include matches in the
 	// rendered output (only when color is enabled).
 	Highlight bool
+	// Where holds field predicates; an entry must satisfy all of them (AND).
+	Where []FieldPredicate
+	// Fields, when non-empty, projects output to just these keys (in order)
+	// instead of the full formatted line.
+	Fields []string
 }
 
 // NewPipeline returns a Pipeline configured by opts.
@@ -76,13 +81,24 @@ func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
 	if matchesAny(p.opts.Exclude, rawLine) {
 		return false
 	}
+	for _, pred := range p.opts.Where {
+		if !pred.Eval(entry) {
+			return false
+		}
+	}
 	return true
 }
 
-// render turns a kept entry into its output line, applying match highlighting
-// when requested.
+// render turns a kept entry into its output line: either the full formatted line
+// or, when Fields is set, a projection of just those keys. Match highlighting is
+// applied last so it works in both modes.
 func (p *Pipeline) render(entry LogEntry) string {
-	out := FormatLogEntry(entry)
+	var out string
+	if len(p.opts.Fields) > 0 {
+		out = FormatProjectedEntry(entry, p.opts.Fields)
+	} else {
+		out = FormatLogEntry(entry)
+	}
 	if p.opts.Highlight && len(p.opts.Include) > 0 {
 		out = highlightMatches(out, p.opts.Include)
 	}

@@ -14,6 +14,8 @@ func addFilterFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArrayP(flagGrep, "g", nil, "Show only lines matching this regex (repeatable; OR)")
 	cmd.Flags().StringArray(flagExclude, nil, "Hide lines matching this regex (repeatable)")
 	cmd.Flags().Bool(flagHighlight, true, "Highlight --grep matches in the output")
+	cmd.Flags().StringArrayP(flagWhere, "w", nil, "Keep entries matching a field predicate, e.g. status>=500 (repeatable; AND)")
+	cmd.Flags().StringSliceP(flagFields, "F", nil, "Project output to only these fields, e.g. ts,level,msg")
 }
 
 // buildPipelineOptions assembles PipelineOptions from the filter flags for the
@@ -41,6 +43,23 @@ func buildPipelineOptions(cmd *cobra.Command, minLevel logging.LogLevel) (loggin
 	}
 
 	opts.Highlight, err = cmd.Flags().GetBool(flagHighlight)
+	if err != nil {
+		return opts, err
+	}
+
+	where, err := cmd.Flags().GetStringArray(flagWhere)
+	if err != nil {
+		return opts, err
+	}
+	for _, expr := range where {
+		pred, perr := logging.ParseFieldPredicate(expr)
+		if perr != nil {
+			return opts, fmt.Errorf("invalid --where %q: %w", expr, perr)
+		}
+		opts.Where = append(opts.Where, pred)
+	}
+
+	opts.Fields, err = cmd.Flags().GetStringSlice(flagFields)
 	if err != nil {
 		return opts, err
 	}

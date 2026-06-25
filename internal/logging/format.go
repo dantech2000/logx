@@ -112,6 +112,56 @@ func FormatLogLevelLabel(level LogLevel) string {
 	return levelColorFor(level).Sprint(fmt.Sprintf("[%s]", level))
 }
 
+// FormatProjectedEntry renders only the requested keys of an entry as
+// `key=value` pairs in the given order (the --fields projection). Virtual keys
+// (level, message, logger, timestamp) are supported alongside structured fields;
+// a missing key is omitted so output stays composable.
+func FormatProjectedEntry(entry LogEntry, fields []string) string {
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		val, ok := projectFieldValue(entry, f)
+		if !ok {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f)), val))
+	}
+	return strings.Join(parts, " ")
+}
+
+// projectFieldValue returns the formatted value for a projection key, or false
+// when the entry has nothing for it.
+func projectFieldValue(entry LogEntry, key string) (string, bool) {
+	switch {
+	case keyIn(key, levelKeys):
+		return levelColorFor(entry.Level).Sprint(entry.Level.String()), true
+	case keyIn(key, messageKeys):
+		msg := entry.Message
+		if msg == "" {
+			msg = entry.RawLine
+		}
+		if msg == "" {
+			return "", false
+		}
+		return formatStringValue(msg), true
+	case keyIn(key, loggerKeys):
+		if entry.Logger == "" {
+			return "", false
+		}
+		return valueColor().Sprint(terminal.Sanitize(entry.Logger)), true
+	case keyIn(key, tsKeys):
+		if entry.Timestamp.IsZero() {
+			return "", false
+		}
+		return timestampColor().Sprint(entry.Timestamp.UTC().Format("2006-01-02 15:04:05")), true
+	}
+	if entry.Fields != nil {
+		if v, ok := fieldValue(entry.Fields, key); ok {
+			return formatValue(v), true
+		}
+	}
+	return "", false
+}
+
 // FormatLogEntryDetails renders the message and structured fields of an entry,
 // dispatching on its detected format.
 func FormatLogEntryDetails(entry LogEntry) string {

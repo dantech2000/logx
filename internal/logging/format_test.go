@@ -188,3 +188,27 @@ func TestFormatValueSanitizesFallbackValues(t *testing.T) {
 		t.Fatalf("formatValue() did not sanitize fallback value: %q", got)
 	}
 }
+
+func TestFormatProjectedEntry(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorNever)
+
+	entry := ParseLogEntry(`{"level":"error","msg":"db down","status":500,"time":"2026-06-24T10:00:00Z"}`)
+	out := FormatProjectedEntry(entry, []string{"level", "status", "msg", "missing"})
+
+	// Requested keys appear in order; the missing key is omitted.
+	want := `level=ERROR status=500 msg="db down"`
+	if out != want {
+		t.Fatalf("FormatProjectedEntry = %q, want %q", out, want)
+	}
+}
+
+func TestFormatProjectedEntryTimestampVirtualKey(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorNever)
+	entry := ParseLogEntry(`{"msg":"hi","ts":"2026-06-24T10:00:00Z"}`)
+	out := FormatProjectedEntry(entry, []string{"ts", "msg"})
+	if out != `ts=2026-06-24 10:00:00 msg=hi` {
+		t.Fatalf("FormatProjectedEntry ts = %q", out)
+	}
+}

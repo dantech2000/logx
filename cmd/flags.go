@@ -20,4 +20,6 @@ const (
 	flagGrep       = "grep"
 	flagExclude    = "exclude"
 	flagHighlight  = "highlight"
+	flagWhere      = "where"
+	flagFields     = "fields"
 )
