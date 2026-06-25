@@ -11,10 +11,12 @@ import (
 )
 
 var logLevelColors = map[LogLevel]*color.Color{
+	TRACE: color.New(color.FgHiBlack),
 	DEBUG: color.New(color.FgCyan),
 	INFO:  color.New(color.FgGreen),
 	WARN:  color.New(color.FgYellow),
 	ERROR: color.New(color.FgRed),
+	FATAL: color.New(color.FgWhite, color.BgRed, color.Bold),
 }
 
 var (

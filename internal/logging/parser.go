@@ -326,8 +326,10 @@ func klogLevel(letter string) LogLevel {
 	switch letter {
 	case "W":
 		return WARN
-	case "E", "F":
+	case "E":
 		return ERROR
+	case "F":
+		return FATAL
 	default: // "I"
 		return INFO
 	}
@@ -769,13 +771,17 @@ func ParseLogLevel(level string) (LogLevel, error) {
 	normalizedLevel := strings.ToUpper(level)
 	// Handle common variations
 	switch {
-	case strings.HasPrefix(normalizedLevel, "DEBUG") || normalizedLevel == "TRACE" || normalizedLevel == "FINE":
+	case normalizedLevel == "TRACE" || normalizedLevel == "VERBOSE" || normalizedLevel == "FINEST":
+		return TRACE, nil
+	case strings.HasPrefix(normalizedLevel, "DEBUG") || normalizedLevel == "FINE":
 		return DEBUG, nil
 	case strings.HasPrefix(normalizedLevel, "INFO") || normalizedLevel == "NOTICE":
 		return INFO, nil
 	case strings.HasPrefix(normalizedLevel, "WARN"):
 		return WARN, nil
-	case strings.HasPrefix(normalizedLevel, "ERR") || normalizedLevel == "CRITICAL" || normalizedLevel == "FATAL":
+	case normalizedLevel == "FATAL" || normalizedLevel == "PANIC":
+		return FATAL, nil
+	case strings.HasPrefix(normalizedLevel, "ERR") || normalizedLevel == "CRITICAL" || normalizedLevel == "CRIT":
 		return ERROR, nil
 	default:
 		return DEBUG, fmt.Errorf("invalid log level: %s", level)
@@ -786,7 +792,8 @@ func ParseLogLevel(level string) (LogLevel, error) {
 // numbering schemes common in the Go/Kubernetes ecosystem this tool serves:
 //
 //   - zap-style small integers, where Info=0, Warn=1, Error=2 (handled below as
-//     explicit cases);
+//     explicit cases; zap's negative Debug=-1 and small DPanic/Panic/Fatal codes
+//     3..5 fall through to the <10 DEBUG bucket);
 //   - bunyan/pino-style decades, where Trace=10, Debug=20, Info=30, Warn=40,
 //     Error=50, Fatal=60 (handled by the range checks).
 //
@@ -805,14 +812,20 @@ func parseNumericLogLevel(level int) LogLevel {
 	}
 
 	switch {
+	case level < 10:
+		return DEBUG
+	case level < 20:
+		return TRACE
 	case level < 30:
 		return DEBUG
 	case level < 40:
 		return INFO
 	case level < 50:
 		return WARN
-	default:
+	case level < 60:
 		return ERROR
+	default:
+		return FATAL
 	}
 }
 
