@@ -36,6 +36,14 @@ type LogFetcher struct {
 	// predicates, projection) applied to streamed logs. Its MinLevel is set from
 	// FilterLevel when the pipeline is built.
 	Filters logging.PipelineOptions
+	// Timestamps requests kubelet RFC3339 timestamps on each line (the pipeline
+	// recognizes and renders them).
+	Timestamps bool
+	// SinceSeconds and SinceTime bound how far back to read (only one is set);
+	// TailLines caps the number of trailing lines. Nil means unbounded.
+	SinceSeconds *int64
+	SinceTime    *metav1.Time
+	TailLines    *int64
 	// Writer is where the logs will be written
 	Writer io.Writer
 }
@@ -170,9 +178,13 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 
 	// Now proceed with log fetching
 	podLogOpts := corev1.PodLogOptions{
-		Container: lf.ContainerName,
-		Follow:    lf.Follow,
-		Previous:  lf.Previous,
+		Container:    lf.ContainerName,
+		Follow:       lf.Follow,
+		Previous:     lf.Previous,
+		Timestamps:   lf.Timestamps,
+		SinceSeconds: lf.SinceSeconds,
+		SinceTime:    lf.SinceTime,
+		TailLines:    lf.TailLines,
 	}
 
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)

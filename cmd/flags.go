@@ -22,4 +22,7 @@ const (
 	flagHighlight  = "highlight"
 	flagWhere      = "where"
 	flagFields     = "fields"
+	flagSince      = "since"
+	flagTail       = "tail"
+	flagTimestamps = "timestamps"
 )

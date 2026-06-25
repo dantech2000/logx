@@ -343,6 +343,11 @@ func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	fetcher := NewLogFetcher(clientset, "default", "test-pod", true, true, &buf)
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.ERROR
+	fetcher.Timestamps = true
+	tail := int64(25)
+	fetcher.TailLines = &tail
+	since := int64(600)
+	fetcher.SinceSeconds = &since
 
 	if err := fetcher.GetLogs(context.Background()); err != nil {
 		t.Fatalf("GetLogs() error = %v", err)
@@ -358,6 +363,15 @@ func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	}
 	if !gotOptions.Previous {
 		t.Fatal("Previous = false, want true")
+	}
+	if !gotOptions.Timestamps {
+		t.Fatal("Timestamps = false, want true")
+	}
+	if gotOptions.TailLines == nil || *gotOptions.TailLines != 25 {
+		t.Fatalf("TailLines = %v, want 25", gotOptions.TailLines)
+	}
+	if gotOptions.SinceSeconds == nil || *gotOptions.SinceSeconds != 600 {
+		t.Fatalf("SinceSeconds = %v, want 600", gotOptions.SinceSeconds)
 	}
 }
 

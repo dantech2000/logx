@@ -47,6 +47,7 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
 	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
 	addFilterFlags(cmd)
+	addLogQueryFlags(cmd)
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -168,6 +169,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.ContainerName = options.container
 	logFetcher.FilterLevel = filterLevel
 	logFetcher.Filters = pipelineOptions
+	if err := applyLogQuery(cmd, logFetcher); err != nil {
+		return err
+	}
 
 	if options.timeline && options.follow {
 		return errors.New("--timeline cannot be used with --follow")
