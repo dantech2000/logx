@@ -49,7 +49,10 @@ func TestLevelTrackerGroupsContinuations(t *testing.T) {
 	}
 
 	// The parent is unchanged by the independent line: a later indented line
-	// still inherits the last detected level.
+	// still inherits the last detected level. This is the intentional
+	// over-inclusion tradeoff (see LevelTracker doc): resetting here would orphan
+	// the indented frames of a Java/Go stack trace whose exception/panic header is
+	// itself a flush-left line.
 	if got := tr.Effective(LogEntry{Level: DEBUG}, "\tmore frame"); got != ERROR {
 		t.Fatalf("indented after independent line = %v, want inherited ERROR", got)
 	}

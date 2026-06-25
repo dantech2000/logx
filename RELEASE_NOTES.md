@@ -21,7 +21,11 @@
 - Grouped multi-line log entries: indented continuation lines (e.g. stack-trace
   frames) now inherit the level of the entry they belong to, so a stack trace
   stays visible when filtering at its parent's `--level` (e.g. `ERROR`). Flush-left
-  lines without a level remain independent, so unrelated output is not swept up.
+  lines without a level keep their own level and are not relabeled. Note: because
+  a clean fix would need lookahead (incompatible with `--follow`), the grouping
+  biases toward over-inclusion — an indented line appearing after an earlier
+  higher-severity entry may inherit that level. This is intentional, to avoid ever
+  hiding a stack frame.
 - Added `--timeline` to show pod logs and Kubernetes events together sorted by timestamp for point-in-time troubleshooting.
 - Added a `[notice]` line in `--timeline` when container logs are unavailable
   (e.g. `ImagePullBackOff`) but events are, and when the event list is truncated.

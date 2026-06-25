@@ -130,7 +130,10 @@ type LogWriter struct {
 	tracker     logging.LevelTracker
 }
 
-// Write implements io.Writer interface
+// Write implements io.Writer. It expects exactly one log line per call (with no
+// embedded newline), which is how GetLogs drives it from a bufio.Scanner. It is
+// not a general-purpose io.Writer: continuation-line detection and the
+// trim-then-parse step rely on p being a single line.
 func (w *LogWriter) Write(p []byte) (n int, err error) {
 	// Keep the untrimmed line so indentation (which marks continuation lines) is
 	// preserved, then trim for parsing.
