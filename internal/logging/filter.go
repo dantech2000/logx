@@ -3,6 +3,7 @@ package logging
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // FilterAndFormatLogs reads log lines from reader, parses each one, and writes
@@ -16,6 +17,11 @@ func FilterAndFormatLogs(reader io.Reader, writer io.Writer, filterLevel LogLeve
 	scanner := NewLineScanner(reader)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
+		// Skip blank/whitespace-only lines so they don't render as empty entries
+		// (and so they don't interfere with multi-line grouping).
+		if strings.TrimSpace(rawLine) == "" {
+			continue
+		}
 		entry := ParseKubernetesLogEntry(rawLine)
 		entry.Level = tracker.Effective(entry, rawLine)
 		if entry.Level >= filterLevel {

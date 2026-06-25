@@ -458,6 +458,21 @@ func TestFilterAndFormatLogsAcceptsLongLines(t *testing.T) {
 	}
 }
 
+func TestFilterAndFormatLogsSkipsBlankLines(t *testing.T) {
+	input := strings.NewReader("INFO one\n\n   \n\t\nINFO two\n")
+	var buf bytes.Buffer
+
+	if err := FilterAndFormatLogs(input, &buf, INFO); err != nil {
+		t.Fatalf("FilterAndFormatLogs() error = %v", err)
+	}
+	// Exactly two output lines (the two real entries); blank/whitespace-only
+	// lines must not render as empty entries.
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d output lines, want 2: %q", len(lines), buf.String())
+	}
+}
+
 func TestParseLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string
