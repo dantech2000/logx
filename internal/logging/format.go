@@ -3,12 +3,75 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
 )
+
+const (
+	// Reverse-video on/off. Unlike a foreground/background color it composes with
+	// the colors already in the rendered line: it only toggles the reverse
+	// attribute, so surrounding theme colors are preserved across the match.
+	highlightOn  = "\x1b[7m"
+	highlightOff = "\x1b[27m"
+)
+
+// highlightMatches wraps every non-overlapping match of any pattern in s with
+// reverse-video so grep matches stand out. Overlapping match ranges from
+// different patterns are merged. It is a no-op when color is disabled, so plain
+// output stays free of escape codes.
+func highlightMatches(s string, patterns []*regexp.Regexp) string {
+	if color.NoColor || len(patterns) == 0 || s == "" {
+		return s
+	}
+
+	type span struct{ start, end int }
+	var spans []span
+	for _, re := range patterns {
+		for _, m := range re.FindAllStringIndex(s, -1) {
+			if m[1] > m[0] { // ignore zero-width matches
+				spans = append(spans, span{m[0], m[1]})
+			}
+		}
+	}
+	if len(spans) == 0 {
+		return s
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+
+	var b strings.Builder
+	cursor := 0
+	cur := spans[0]
+	flush := func(sp span) {
+		if sp.start < cursor {
+			sp.start = cursor
+		}
+		if sp.start >= sp.end {
+			return
+		}
+		b.WriteString(s[cursor:sp.start])
+		b.WriteString(highlightOn)
+		b.WriteString(s[sp.start:sp.end])
+		b.WriteString(highlightOff)
+		cursor = sp.end
+	}
+	for _, sp := range spans[1:] {
+		if sp.start <= cur.end { // overlapping/adjacent: merge
+			if sp.end > cur.end {
+				cur.end = sp.end
+			}
+			continue
+		}
+		flush(cur)
+		cur = sp
+	}
+	flush(cur)
+	b.WriteString(s[cursor:])
+	return b.String()
+}
 
 // Color accessors read from the active theme (see theme.go) so a --theme switch
 // re-colors all output through one place.

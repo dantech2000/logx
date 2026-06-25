@@ -17,4 +17,7 @@ const (
 	flagColor      = "color"
 	flagNoColor    = "no-color"
 	flagTheme      = "theme"
+	flagGrep       = "grep"
+	flagExclude    = "exclude"
+	flagHighlight  = "highlight"
 )

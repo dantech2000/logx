@@ -19,7 +19,6 @@ type Theme struct {
 	value     *color.Color
 	quote     *color.Color
 	errorText *color.Color
-	highlight *color.Color // background emphasis for --grep matches
 }
 
 // darkTheme is the default, tuned for dark terminal backgrounds.
@@ -39,7 +38,6 @@ func darkTheme() *Theme {
 		value:     color.New(color.FgWhite),
 		quote:     color.New(color.FgHiBlack),
 		errorText: color.New(color.FgRed, color.Bold),
-		highlight: color.New(color.BgYellow, color.FgBlack),
 	}
 }
 
@@ -62,7 +60,6 @@ func lightTheme() *Theme {
 		value:     color.New(color.FgBlack),
 		quote:     color.New(color.FgHiBlack),
 		errorText: color.New(color.FgRed, color.Bold),
-		highlight: color.New(color.BgYellow, color.FgBlack),
 	}
 }
 

@@ -32,6 +32,10 @@ type LogFetcher struct {
 	Previous bool
 	// FilterLevel is the minimum level that will be written
 	FilterLevel logging.LogLevel
+	// Filters carries the content filters (grep/exclude/highlight, field
+	// predicates, projection) applied to streamed logs. Its MinLevel is set from
+	// FilterLevel when the pipeline is built.
+	Filters logging.PipelineOptions
 	// Writer is where the logs will be written
 	Writer io.Writer
 }
@@ -178,9 +182,11 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 	defer func() { _ = podLogs.Close() }()
 
-	// Drive the shared pipeline over the stream, one line at a time.
-	pipeline := logging.NewPipeline(logging.PipelineOptions{MinLevel: lf.FilterLevel})
-	logWriter := NewLogWriterWithPipeline(lf.Writer, pipeline)
+	// Drive the shared pipeline over the stream, one line at a time. The level
+	// is authoritative from FilterLevel; the rest of the filters come from Filters.
+	pipelineOpts := lf.Filters
+	pipelineOpts.MinLevel = lf.FilterLevel
+	logWriter := NewLogWriterWithPipeline(lf.Writer, logging.NewPipeline(pipelineOpts))
 	scanner := logging.NewLineReader(podLogs)
 	for scanner.Scan() {
 		if _, err := logWriter.Write([]byte(scanner.Text())); err != nil {

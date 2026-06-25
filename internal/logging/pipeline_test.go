@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -85,5 +86,71 @@ func TestPipelineHonorsKubeletTimestampPrefix(t *testing.T) {
 	}
 	if !strings.Contains(out, "[2024-03-15 12:19:57]") || !strings.Contains(out, "hello") {
 		t.Fatalf("kubelet timestamp prefix not applied: %q", out)
+	}
+}
+
+func collectPipeline(p *Pipeline, lines ...string) []string {
+	var out []string
+	for _, l := range lines {
+		if rendered, ok := p.ProcessLine(l); ok {
+			out = append(out, rendered)
+		}
+	}
+	return out
+}
+
+func TestPipelineGrepInclude(t *testing.T) {
+	p := NewPipeline(PipelineOptions{MinLevel: TRACE, Include: []*regexp.Regexp{regexp.MustCompile(`order`)}})
+	got := collectPipeline(p, "INFO order placed", "INFO user login", "WARN order failed")
+	if len(got) != 2 {
+		t.Fatalf("include kept %d lines, want 2: %q", len(got), got)
+	}
+}
+
+func TestPipelineExclude(t *testing.T) {
+	p := NewPipeline(PipelineOptions{MinLevel: TRACE, Exclude: []*regexp.Regexp{regexp.MustCompile(`healthz`)}})
+	got := collectPipeline(p, "INFO GET /healthz", "INFO GET /api", "INFO GET /healthz again")
+	if len(got) != 1 {
+		t.Fatalf("exclude kept %d lines, want 1: %q", len(got), got)
+	}
+}
+
+func TestPipelineIncludeThenExclude(t *testing.T) {
+	p := NewPipeline(PipelineOptions{
+		MinLevel: TRACE,
+		Include:  []*regexp.Regexp{regexp.MustCompile(`order`)},
+		Exclude:  []*regexp.Regexp{regexp.MustCompile(`cancelled`)},
+	})
+	got := collectPipeline(p, "INFO order placed", "INFO order cancelled", "INFO login")
+	if len(got) != 1 {
+		t.Fatalf("include+exclude kept %d lines, want 1 (order placed): %q", len(got), got)
+	}
+}
+
+func TestPipelineMultipleIncludeIsOr(t *testing.T) {
+	p := NewPipeline(PipelineOptions{
+		MinLevel: TRACE,
+		Include:  []*regexp.Regexp{regexp.MustCompile(`alpha`), regexp.MustCompile(`beta`)},
+	})
+	got := collectPipeline(p, "INFO alpha", "INFO beta", "INFO gamma")
+	if len(got) != 2 {
+		t.Fatalf("OR include kept %d lines, want 2: %q", len(got), got)
+	}
+}
+
+func TestPipelineHighlightHonorsColor(t *testing.T) {
+	restoreColor(t)
+	opts := PipelineOptions{MinLevel: TRACE, Highlight: true, Include: []*regexp.Regexp{regexp.MustCompile(`boom`)}}
+
+	ApplyColorMode(ColorNever)
+	out, _ := NewPipeline(opts).ProcessLine("INFO boom happened")
+	if strings.Contains(out, highlightOn) {
+		t.Fatalf("highlight leaked escapes with color off: %q", out)
+	}
+
+	ApplyColorMode(ColorAlways)
+	out, _ = NewPipeline(opts).ProcessLine("INFO boom happened")
+	if !strings.Contains(out, highlightOn) {
+		t.Fatalf("highlight missing with color on: %q", out)
 	}
 }

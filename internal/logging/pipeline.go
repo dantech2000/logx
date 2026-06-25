@@ -3,6 +3,7 @@ package logging
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -26,6 +27,15 @@ type Pipeline struct {
 type PipelineOptions struct {
 	// MinLevel drops entries whose effective level is below it.
 	MinLevel LogLevel
+	// Include keeps only lines matching at least one pattern (logical OR). An
+	// empty slice keeps everything. Patterns match against the original raw line.
+	Include []*regexp.Regexp
+	// Exclude drops any line matching at least one pattern. It is applied after
+	// Include.
+	Exclude []*regexp.Regexp
+	// Highlight, when true, reverse-video-highlights the Include matches in the
+	// rendered output (only when color is enabled).
+	Highlight bool
 }
 
 // NewPipeline returns a Pipeline configured by opts.
@@ -46,20 +56,47 @@ func (p *Pipeline) ProcessLine(rawLine string) (string, bool) {
 	}
 	entry := ParseKubernetesLogEntry(rawLine)
 	entry.Level = p.tracker.Effective(entry, rawLine)
-	if !p.keep(entry) {
+	if !p.keep(entry, rawLine) {
 		return "", false
 	}
 	return p.render(entry), true
 }
 
-// keep reports whether an entry passes all configured filters.
-func (p *Pipeline) keep(entry LogEntry) bool {
-	return entry.Level >= p.opts.MinLevel
+// keep reports whether an entry passes all configured filters. Level filtering
+// keeps multi-line entries together (continuation lines inherit their parent's
+// level via the tracker); content filters (Include/Exclude) match per line,
+// which is the least surprising behavior for a grep-style filter.
+func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
+	if entry.Level < p.opts.MinLevel {
+		return false
+	}
+	if len(p.opts.Include) > 0 && !matchesAny(p.opts.Include, rawLine) {
+		return false
+	}
+	if matchesAny(p.opts.Exclude, rawLine) {
+		return false
+	}
+	return true
 }
 
-// render turns a kept entry into its output line.
+// render turns a kept entry into its output line, applying match highlighting
+// when requested.
 func (p *Pipeline) render(entry LogEntry) string {
-	return FormatLogEntry(entry)
+	out := FormatLogEntry(entry)
+	if p.opts.Highlight && len(p.opts.Include) > 0 {
+		out = highlightMatches(out, p.opts.Include)
+	}
+	return out
+}
+
+// matchesAny reports whether s matches any of the patterns.
+func matchesAny(patterns []*regexp.Regexp, s string) bool {
+	for _, re := range patterns {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
 }
 
 // Run reads newline-delimited lines from r, processes each, and writes the

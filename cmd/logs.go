@@ -46,6 +46,7 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
 	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
+	addFilterFlags(cmd)
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -145,6 +146,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid level %q: %w", options.level, err)
 	}
 
+	pipelineOptions, err := buildPipelineOptions(cmd, filterLevel)
+	if err != nil {
+		return err
+	}
+
 	clientset, namespace, err := kubernetesClientFromFlags(cmd)
 	if err != nil {
 		return fmt.Errorf("error getting kubernetes client: %w", err)
@@ -161,6 +167,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	)
 	logFetcher.ContainerName = options.container
 	logFetcher.FilterLevel = filterLevel
+	logFetcher.Filters = pipelineOptions
 
 	if options.timeline && options.follow {
 		return errors.New("--timeline cannot be used with --follow")

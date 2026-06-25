@@ -30,7 +30,8 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(parseCmd)
-	parseCmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
+	parseCmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
+	addFilterFlags(parseCmd)
 }
 
 func runParse(cmd *cobra.Command, args []string) error {
@@ -43,13 +44,18 @@ func runParse(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid level %q: %w", levelStr, err)
 	}
 
+	opts, err := buildPipelineOptions(cmd, level)
+	if err != nil {
+		return err
+	}
+
 	reader, closeFn, err := openLogSource(cmd, args)
 	if err != nil {
 		return err
 	}
 	defer closeFn()
 
-	return logging.FilterAndFormatLogs(reader, cmd.OutOrStdout(), level)
+	return logging.NewPipeline(opts).Run(reader, cmd.OutOrStdout())
 }
 
 // openLogSource returns the log input: the named file, or stdin when no file (or
