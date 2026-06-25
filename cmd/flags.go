@@ -14,4 +14,7 @@ const (
 	flagTimeline   = "timeline"
 	flagOutput     = "output"
 	flagShort      = "short"
+	flagColor      = "color"
+	flagNoColor    = "no-color"
+	flagTheme      = "theme"
 )

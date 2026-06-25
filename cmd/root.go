@@ -27,6 +27,10 @@ Use "logx [command] --help" for more information about a command.`,
 	// them or the usage text on a runtime (non-usage) error.
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	// Configure colorized rendering once, before any command writes output.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return applyOutputConfig(cmd)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return cmd.Help()
@@ -56,6 +60,7 @@ func Execute() error {
 func init() {
 	addKubeFlags(rootCmd)
 	addLogFlags(rootCmd)
+	addOutputFlags(rootCmd)
 	rootCmd.ValidArgsFunction = completePodNames
 	_ = rootCmd.RegisterFlagCompletionFunc(flagContainer, completeContainerNames)
 }
