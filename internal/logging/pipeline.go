@@ -41,6 +41,8 @@ type PipelineOptions struct {
 	// Fields, when non-empty, projects output to just these keys (in order)
 	// instead of the full formatted line.
 	Fields []string
+	// Output selects the rendering format (text or JSON/NDJSON).
+	Output OutputFormat
 }
 
 // NewPipeline returns a Pipeline configured by opts.
@@ -93,6 +95,13 @@ func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
 // or, when Fields is set, a projection of just those keys. Match highlighting is
 // applied last so it works in both modes.
 func (p *Pipeline) render(entry LogEntry) string {
+	if p.opts.Output == OutputJSON {
+		if len(p.opts.Fields) > 0 {
+			return MarshalProjectedJSON(entry, p.opts.Fields)
+		}
+		return MarshalEntryJSON(entry)
+	}
+
 	var out string
 	if len(p.opts.Fields) > 0 {
 		out = FormatProjectedEntry(entry, p.opts.Fields)

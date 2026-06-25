@@ -16,6 +16,7 @@ func addFilterFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool(flagHighlight, true, "Highlight --grep matches in the output")
 	cmd.Flags().StringArrayP(flagWhere, "w", nil, "Keep entries matching a field predicate, e.g. status>=500 (repeatable; AND)")
 	cmd.Flags().StringSliceP(flagFields, "F", nil, "Project output to only these fields, e.g. ts,level,msg")
+	cmd.Flags().StringP(flagOutput, "o", "text", "Output format: text or json")
 }
 
 // buildPipelineOptions assembles PipelineOptions from the filter flags for the
@@ -60,6 +61,15 @@ func buildPipelineOptions(cmd *cobra.Command, minLevel logging.LogLevel) (loggin
 	}
 
 	opts.Fields, err = cmd.Flags().GetStringSlice(flagFields)
+	if err != nil {
+		return opts, err
+	}
+
+	outStr, err := cmd.Flags().GetString(flagOutput)
+	if err != nil {
+		return opts, err
+	}
+	opts.Output, err = logging.ParseOutputFormat(outStr)
 	if err != nil {
 		return opts, err
 	}
