@@ -158,7 +158,7 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 
 	var items []timelineItem
 	var tracker logging.LevelTracker
-	scanner := logging.NewLineScanner(podLogs)
+	scanner := logging.NewLineReader(podLogs)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		entry := logging.ParseKubernetesLogEntry(rawLine)

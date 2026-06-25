@@ -131,7 +131,7 @@ type LogWriter struct {
 }
 
 // Write implements io.Writer. It expects exactly one log line per call (with no
-// embedded newline), which is how GetLogs drives it from a bufio.Scanner. It is
+// embedded newline), which is how GetLogs drives it from the line reader. It is
 // not a general-purpose io.Writer: continuation-line detection and the
 // trim-then-parse step rely on p being a single line.
 func (w *LogWriter) Write(p []byte) (n int, err error) {
@@ -184,7 +184,7 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	defer func() { _ = podLogs.Close() }()
 
 	// Create a scanner to read logs line by line
-	scanner := logging.NewLineScanner(podLogs)
+	scanner := logging.NewLineReader(podLogs)
 	logWriter := NewLogWriter(lf.Writer)
 	logWriter.filterLevel = lf.FilterLevel
 

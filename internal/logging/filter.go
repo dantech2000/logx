@@ -14,7 +14,7 @@ import (
 // used as the entry's timestamp, so piping such output in still parses cleanly.
 func FilterAndFormatLogs(reader io.Reader, writer io.Writer, filterLevel LogLevel) error {
 	var tracker LevelTracker
-	scanner := NewLineScanner(reader)
+	scanner := NewLineReader(reader)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		// Skip blank/whitespace-only lines so they don't render as empty entries
