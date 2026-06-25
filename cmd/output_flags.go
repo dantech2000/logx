@@ -27,6 +27,7 @@ func applyOutputConfig(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	colorStr = stringDefault(colorStr, loadedConfig.Color, cmd.Flags().Changed(flagColor))
 	mode, err := logging.ParseColorMode(colorStr)
 	if err != nil {
 		return err
@@ -40,5 +41,6 @@ func applyOutputConfig(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	theme = stringDefault(theme, loadedConfig.Theme, cmd.Flags().Changed(flagTheme))
 	return logging.SetTheme(theme)
 }

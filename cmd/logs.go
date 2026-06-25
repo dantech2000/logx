@@ -142,9 +142,9 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
 	}
 
-	level, err := cmd.Flags().GetString(flagLevel)
+	level, err := effectiveLevel(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("error getting level flag: %w", err)
+		return nil, err
 	}
 
 	previous, err := cmd.Flags().GetBool(flagPrevious)

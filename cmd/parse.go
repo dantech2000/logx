@@ -35,9 +35,9 @@ func init() {
 }
 
 func runParse(cmd *cobra.Command, args []string) error {
-	levelStr, err := cmd.Flags().GetString(flagLevel)
+	levelStr, err := effectiveLevel(cmd)
 	if err != nil {
-		return fmt.Errorf("error getting level flag: %w", err)
+		return err
 	}
 	level, err := logging.ParseLogLevel(levelStr)
 	if err != nil {

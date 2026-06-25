@@ -27,8 +27,15 @@ Use "logx [command] --help" for more information about a command.`,
 	// them or the usage text on a runtime (non-usage) error.
 	SilenceErrors: true,
 	SilenceUsage:  true,
-	// Configure colorized rendering once, before any command writes output.
+	// Load config and configure colorized rendering once, before any command
+	// writes output.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		loadedConfig = cfg
+		cfg.applyFieldAliases()
 		return applyOutputConfig(cmd)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
