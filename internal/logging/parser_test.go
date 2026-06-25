@@ -527,6 +527,48 @@ func TestParseLogEntryAccessLog(t *testing.T) {
 	}
 }
 
+func TestParseLogEntrySyslogPriority(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+		wantMatch bool
+	}{
+		{"critical (sev 2)", "<34>1 2026-06-24T10:00:00Z h app - - - disk", ERROR, true},
+		{"error (sev 3)", "<11>1 2026-06-24T10:00:00Z h app - - - boom", ERROR, true},
+		{"warning (sev 4)", "<28>Jun 24 10:00:02 h app[42]: state", WARN, true},
+		{"notice (sev 5)", "<13>1 2026-06-24T10:00:01Z h app - - - note", INFO, true},
+		{"info (sev 6)", "<14>1 2026-06-24T10:00:01Z h app - - - fyi", INFO, true},
+		{"debug (sev 7)", "<15>detail", DEBUG, true},
+		{"priority out of range is not syslog", "<999>not a priority", DEBUG, false},
+		{"no priority is not syslog", "just text <34> here", DEBUG, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if got.LevelDetected != tt.wantMatch {
+				t.Errorf("LevelDetected = %v, want %v", got.LevelDetected, tt.wantMatch)
+			}
+		})
+	}
+}
+
+func TestParseLogEntryEnvoyAccessLog(t *testing.T) {
+	// Envoy puts response flags between the status and the byte counts, so the
+	// status must be recognized via the quoted HTTP request, not a trailing size.
+	got := ParseLogEntry(`[2026-06-24T10:00:00.123Z] "GET /api HTTP/1.1" 503 UF 0 91 1 - "-" "curl"`)
+	if got.Level != ERROR {
+		t.Fatalf("Level = %v, want ERROR for a 503", got.Level)
+	}
+	ok := ParseLogEntry(`[2026-06-24T10:00:01.000Z] "GET /ok HTTP/2" 200 - 0 5`)
+	if ok.Level != DEBUG {
+		t.Fatalf("Level = %v, want DEBUG for a 200", ok.Level)
+	}
+}
+
 func TestFilterAndFormatLogsSkipsBlankLines(t *testing.T) {
 	input := strings.NewReader("INFO one\n\n   \n\t\nINFO two\n")
 	var buf bytes.Buffer

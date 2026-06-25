@@ -98,6 +98,7 @@ var logParsers = []logParser{
 	bracketedLogParser{},
 	logfmtLogParser{},
 	klogLogParser{},
+	syslogParser{},
 	accessLogParser{},
 }
 
@@ -249,14 +250,53 @@ func (klogLogParser) Parse(line string) (LogEntry, bool) {
 	}, true
 }
 
+type syslogParser struct{}
+
+// syslogPriorityRegex matches the leading "<PRI>" of a syslog line (RFC 3164 or
+// RFC 5424). PRI = facility*8 + severity; severity (PRI mod 8) gives the level.
+var syslogPriorityRegex = regexp.MustCompile(`^<(\d{1,3})>`)
+
+func (syslogParser) Parse(line string) (LogEntry, bool) {
+	matches := syslogPriorityRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return LogEntry{}, false
+	}
+	pri, err := strconv.Atoi(matches[1])
+	if err != nil || pri > 191 { // valid PRI is 0..191 (facility 0..23, severity 0..7)
+		return LogEntry{}, false
+	}
+	return LogEntry{
+		Level:         syslogSeverityLevel(pri % 8),
+		LevelDetected: true,
+		Message:       strings.TrimSpace(line[len(matches[0]):]),
+		Format:        FormatPlainText,
+		RawLine:       line,
+	}, true
+}
+
+// syslogSeverityLevel maps an RFC 5424 severity (0..7) to a LogLevel.
+func syslogSeverityLevel(severity int) LogLevel {
+	switch {
+	case severity <= 3: // Emergency, Alert, Critical, Error
+		return ERROR
+	case severity == 4: // Warning
+		return WARN
+	case severity <= 6: // Notice, Informational
+		return INFO
+	default: // Debug (7)
+		return DEBUG
+	}
+}
+
 type accessLogParser struct{}
 
-// accessLogStatusRegex matches the request + status + response-size portion of
-// the Apache/nginx common and combined log formats, e.g.
-// `"GET /path HTTP/1.1" 404 153`. Requiring the HTTP method and the trailing size
-// (a byte count or "-") keeps the match specific enough to avoid false positives
-// on ordinary prose that merely contains a quoted phrase and a number.
-var accessLogStatusRegex = regexp.MustCompile(`"(?:GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE) [^"]*"\s+(\d{3})\s+(?:\d+|-)`)
+// accessLogStatusRegex matches the quoted request line (including its HTTP
+// version) followed by the status code, as used by the Apache/nginx common and
+// combined formats and by Envoy, e.g. `"GET /path HTTP/1.1" 404` or
+// `"GET /api HTTP/1.1" 503 UF ...`. Requiring the HTTP method and the `HTTP/x`
+// protocol keeps the match specific enough to avoid false positives on prose that
+// merely contains a quoted phrase and a number.
+var accessLogStatusRegex = regexp.MustCompile(`"(?:GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE) [^"]*HTTP/[0-9.]+"\s+(\d{3})\b`)
 
 func (accessLogParser) Parse(line string) (LogEntry, bool) {
 	matches := accessLogStatusRegex.FindStringSubmatch(line)
