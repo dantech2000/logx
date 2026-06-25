@@ -227,14 +227,17 @@ func formatStringValue(val string) string {
 	return valueColor.Sprint(val)
 }
 
-// formatJSONNumber renders a json.Number as an integer when possible, otherwise
-// as a two-decimal float, falling back to its sanitized string form.
+// formatJSONNumber renders a json.Number. Integer literals are printed verbatim
+// (so large IDs beyond int64 keep full precision and don't gain a ".00"); values
+// with a fraction or exponent are rendered with two decimals.
 func formatJSONNumber(val json.Number) string {
-	if _, err := val.Int64(); err == nil {
-		return valueColor.Sprint(val.String())
+	s := val.String()
+	if !strings.ContainsAny(s, ".eE") {
+		// Pure integer literal: preserve exactly (handles values larger than int64).
+		return valueColor.Sprint(terminal.Sanitize(s))
 	}
 	if parsedValue, err := val.Float64(); err == nil {
 		return valueColor.Sprintf("%.2f", parsedValue)
 	}
-	return valueColor.Sprint(terminal.Sanitize(val.String()))
+	return valueColor.Sprint(terminal.Sanitize(s))
 }

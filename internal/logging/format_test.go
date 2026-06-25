@@ -131,6 +131,17 @@ func TestFormatLogEntryDoesNotDuplicateTimestampAndLevel(t *testing.T) {
 	}
 }
 
+func TestFormatLogEntryDetailsPreservesLargeIntegers(t *testing.T) {
+	entry := ParseLogEntry(`{"level":"info","msg":"n","big":99999999999999999999,"id":17592186044416,"ratio":0.5,"sci":1.5e10}`)
+	got := FormatLogEntryDetails(entry)
+	assertInOrder(t, got, []string{
+		"big=99999999999999999999", // beyond int64, kept verbatim, no ".00"
+		"id=17592186044416",
+		"ratio=0.50",
+		"sci=15000000000.00",
+	})
+}
+
 func TestFormatLogEntryNormalizesTimestampToUTC(t *testing.T) {
 	// A timestamp in a non-UTC zone (as epoch values parse to local time) must be
 	// displayed in UTC for consistency with the timeline output.
