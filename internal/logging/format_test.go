@@ -3,6 +3,7 @@ package logging
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 type ansiStringer struct{}
@@ -69,6 +70,38 @@ func TestFormatLogEntryDetailsRendersLogfmtStructured(t *testing.T) {
 		if strings.Contains(got, excluded) {
 			t.Fatalf("logfmt details leaked %q (raw line not reconstructed?): %q", excluded, got)
 		}
+	}
+}
+
+func TestFormatLogEntryDetailsLogfmtWithoutMessage(t *testing.T) {
+	// A logfmt line with no msg field must render its fields once, not the raw
+	// line followed by the fields again.
+	entry := ParseLogEntry(`time=2026-06-24T10:00:00Z level=info component=db rows=5`)
+	if entry.Format != FormatLogfmt {
+		t.Fatalf("Format = %v, want FormatLogfmt", entry.Format)
+	}
+
+	got := FormatLogEntryDetails(entry)
+	assertInOrder(t, got, []string{"component=db", "rows=5"})
+	if strings.Count(got, "component=db") != 1 {
+		t.Fatalf("fields duplicated: %q", got)
+	}
+	for _, leaked := range []string{"time=", "level=", "2026-06-24T10:00:00Z"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("raw line / excluded field leaked: %q", got)
+		}
+	}
+}
+
+func TestFormatLogEntryNormalizesTimestampToUTC(t *testing.T) {
+	// A timestamp in a non-UTC zone (as epoch values parse to local time) must be
+	// displayed in UTC for consistency with the timeline output.
+	loc := time.FixedZone("UTC+5", 5*3600)
+	entry := LogEntry{Level: INFO, Timestamp: time.Date(2026, 6, 24, 15, 0, 0, 0, loc)}
+
+	got := FormatLogEntry(entry)
+	if !strings.Contains(got, "[2026-06-24 10:00:00]") {
+		t.Fatalf("timestamp not normalized to UTC (15:00 +05:00 -> 10:00 UTC): %q", got)
 	}
 }
 

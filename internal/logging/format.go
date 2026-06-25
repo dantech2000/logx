@@ -34,7 +34,10 @@ func FormatLogEntry(entry LogEntry) string {
 	var parts []string
 
 	if !entry.Timestamp.IsZero() {
-		parts = append(parts, timestampColor.Sprintf("[%s]", entry.Timestamp.Format("2006-01-02 15:04:05")))
+		// Normalize to UTC so timestamps are consistent regardless of the source
+		// format (RFC3339 parses to UTC, but epoch values parse to local time);
+		// this also matches the --timeline output.
+		parts = append(parts, timestampColor.Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
 	}
 
 	parts = append(parts, FormatLogLevelLabel(entry.Level))
@@ -74,7 +77,10 @@ func FormatLogEntryDetails(entry LogEntry) string {
 // (which would duplicate the timestamp/level that logx already prints).
 func formatStructuredDetails(entry LogEntry) string {
 	var parts []string
-	if entry.Message != "" {
+	// Skip the message when it is just the raw line (the parser's fallback when
+	// no message field was found); otherwise the raw line would be printed and
+	// then the fields repeated after it.
+	if entry.Message != "" && entry.Message != entry.RawLine {
 		parts = append(parts, formatMessage(entry, terminal.Sanitize(entry.Message)))
 	}
 	parts = append(parts, formatSortedFields(entry.Fields)...)
