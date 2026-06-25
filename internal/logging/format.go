@@ -59,10 +59,29 @@ func FormatLogLevelLabel(level LogLevel) string {
 // FormatLogEntryDetails renders the message and structured fields of an entry,
 // dispatching on its detected format.
 func FormatLogEntryDetails(entry LogEntry) string {
-	if entry.Format == FormatJSON {
+	switch entry.Format {
+	case FormatJSON:
 		return formatJSONDetails(entry)
+	case FormatBracketed, FormatLogfmt:
+		return formatStructuredDetails(entry)
+	default:
+		return formatPlainTextDetails(entry)
 	}
-	return formatPlainTextDetails(entry)
+}
+
+// formatStructuredDetails renders the parsed message and remaining fields of a
+// bracketed or logfmt entry, so the reconstructed output is not the raw line
+// (which would duplicate the timestamp/level that logx already prints).
+func formatStructuredDetails(entry LogEntry) string {
+	var parts []string
+	if entry.Message != "" {
+		parts = append(parts, formatMessage(entry, terminal.Sanitize(entry.Message)))
+	}
+	parts = append(parts, formatSortedFields(entry.Fields)...)
+	if len(parts) == 0 {
+		return formatPlainTextDetails(entry)
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatJSONDetails(entry LogEntry) string {

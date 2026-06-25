@@ -235,6 +235,8 @@ func detectLoggerLabel(data map[string]interface{}) string {
 		return "python"
 	case data["stream"] != nil && data["log"] != nil:
 		return "docker"
+	case data["pid"] != nil && data["level"] != nil && data["time"] != nil:
+		return "pino"
 	case data["level"] != nil && data["msg"] != nil:
 		return "logrus"
 	default:

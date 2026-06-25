@@ -55,6 +55,37 @@ func TestFormatLogEntryDetailsFormatsArraysAndNumbers(t *testing.T) {
 	})
 }
 
+func TestFormatLogEntryDetailsRendersLogfmtStructured(t *testing.T) {
+	entry := ParseLogEntry(`time=2026-06-24T10:05:00Z level=info component=worker msg="job started" job_id=j-1`)
+	if entry.Format != FormatLogfmt {
+		t.Fatalf("Format = %v, want FormatLogfmt", entry.Format)
+	}
+
+	got := FormatLogEntryDetails(entry)
+	// The reconstructed details must be the message + remaining fields, not the
+	// raw line (which would duplicate the time/level logx already prints).
+	assertInOrder(t, got, []string{"job started", "component=worker", "job_id=j-1"})
+	for _, excluded := range []string{"time=", "level=", "msg=", "2026-06-24T10:05:00Z"} {
+		if strings.Contains(got, excluded) {
+			t.Fatalf("logfmt details leaked %q (raw line not reconstructed?): %q", excluded, got)
+		}
+	}
+}
+
+func TestFormatLogEntryDetailsRendersBracketedStructured(t *testing.T) {
+	entry := ParseLogEntry(`[2026-06-24 10:07:00] [INFO] [api] request accepted method=GET status=200`)
+	if entry.Format != FormatBracketed {
+		t.Fatalf("Format = %v, want FormatBracketed", entry.Format)
+	}
+
+	got := FormatLogEntryDetails(entry)
+	assertInOrder(t, got, []string{"request accepted", "method=GET", "status=200"})
+	// No duplicated bracketed prefix in the reconstructed details.
+	if strings.Contains(got, "[INFO]") || strings.Contains(got, "[api]") {
+		t.Fatalf("bracketed details leaked the raw prefix: %q", got)
+	}
+}
+
 func TestFormatLogEntryHandlesUnknownLevel(t *testing.T) {
 	entry := LogEntry{
 		Level:   LogLevel(99),

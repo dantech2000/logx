@@ -11,6 +11,7 @@
 - Previous container logs with `-p`
 - Live log following with `-f`
 - Container listing with JSON, YAML, and POSIX output
+- Parsing logs from a file or stdin (no cluster needed) via `logx parse`
 
 ## Installation
 
@@ -161,6 +162,19 @@ logx containers my-pod -o json
 logx containers my-pod -o yaml
 logx containers my-pod -o posix
 ```
+
+Parse logs from a file or stdin (no cluster required):
+
+```bash
+logx parse app.log
+logx parse app.log -l WARN
+kubectl logs my-pod | logx parse -l ERROR
+cat app.log | logx parse
+```
+
+`parse` runs the same parsing, multi-line grouping, and `--level` filtering as
+`logx logs`, so it is handy for inspecting captured logs or piping output from
+other tools. It also understands a leading `kubectl logs --timestamps` prefix.
 
 Version information:
 

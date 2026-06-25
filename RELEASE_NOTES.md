@@ -18,6 +18,10 @@
 
 ## Added
 
+- `logx parse [file]` reads logs from a file or stdin and renders them with the
+  same parsing, multi-line grouping, and `--level` filtering as `logx logs` — no
+  cluster required. It also recognizes a leading `kubectl logs --timestamps`
+  prefix (`kubectl logs pod | logx parse`).
 - Grouped multi-line log entries: indented continuation lines (e.g. stack-trace
   frames) now inherit the level of the entry they belong to, so a stack trace
   stays visible when filtering at its parent's `--level` (e.g. `ERROR`). Flush-left
@@ -46,6 +50,10 @@
 
 ## Fixed
 
+- Render logfmt and bracketed log lines as reconstructed message + fields instead
+  of echoing the raw line, which previously duplicated the timestamp/level that
+  logx already prints.
+- Correctly label pino JSON logs (previously detected as logrus).
 - Fixed `--level` so it now filters streamed logs by minimum severity.
 - Stopped mis-parsing trailing URLs/paths (e.g. `/v1/items?page=2`) as `key=value`
   log fields; they now stay in the message text.
