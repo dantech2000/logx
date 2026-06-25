@@ -22,6 +22,9 @@ type LogFetcher struct {
 	Clientset kubernetes.Interface
 	// Namespace is the Kubernetes namespace
 	Namespace string
+	// AllNamespaces, when set, makes selector-based fetching search every
+	// namespace instead of just Namespace.
+	AllNamespaces bool
 	// PodName is the name of the pod
 	PodName string
 	// ContainerName is the name of the container (optional, will prompt if not provided)

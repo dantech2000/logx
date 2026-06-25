@@ -27,4 +27,5 @@ const (
 	flagTimestamps    = "timestamps"
 	flagAllContainers = "all-containers"
 	flagSelector      = "selector"
+	flagAllNamespaces = "all-namespaces"
 )

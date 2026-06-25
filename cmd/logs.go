@@ -16,6 +16,7 @@ type logOptions struct {
 	container     string
 	allContainers bool
 	selector      string
+	allNamespaces bool
 	follow        bool
 	level         string
 	podName       string
@@ -48,6 +49,7 @@ func init() {
 func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP(flagContainer, "c", "", "Specific container name within the pod")
 	cmd.Flags().String(flagSelector, "", "Label selector (e.g. app=api); streams logs from all matching pods")
+	cmd.Flags().BoolP(flagAllNamespaces, "A", false, "With --selector, match pods across all namespaces")
 	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
@@ -124,6 +126,11 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting selector flag: %w", err)
 	}
 
+	allNamespaces, err := cmd.Flags().GetBool(flagAllNamespaces)
+	if err != nil {
+		return nil, fmt.Errorf("error getting all-namespaces flag: %w", err)
+	}
+
 	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
@@ -153,6 +160,7 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		container:     container,
 		allContainers: allContainers,
 		selector:      selector,
+		allNamespaces: allNamespaces,
 		follow:        follow,
 		level:         level,
 		podName:       podName,
@@ -193,6 +201,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.ContainerName = options.container
 	logFetcher.FilterLevel = filterLevel
 	logFetcher.Filters = pipelineOptions
+	logFetcher.AllNamespaces = options.allNamespaces
 	if err := applyLogQuery(cmd, logFetcher); err != nil {
 		return err
 	}
@@ -237,6 +246,9 @@ func validateLogOptions(o *logOptions) error {
 	}
 	if o.selector != "" && o.podName != "" {
 		return errors.New("provide either a pod name or --selector, not both")
+	}
+	if o.allNamespaces && o.selector == "" {
+		return errors.New("--all-namespaces requires --selector")
 	}
 	return nil
 }

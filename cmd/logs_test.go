@@ -138,3 +138,12 @@ func TestValidateLogOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateLogOptionsAllNamespaces(t *testing.T) {
+	if err := validateLogOptions(&logOptions{allNamespaces: true}); err == nil {
+		t.Fatal("--all-namespaces without --selector should error")
+	}
+	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api"}); err != nil {
+		t.Fatalf("--all-namespaces with --selector should be valid, got %v", err)
+	}
+}

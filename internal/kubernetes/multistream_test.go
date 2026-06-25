@@ -133,3 +133,41 @@ func TestLogFetcher_GetSelectedPodLogsNoMatch(t *testing.T) {
 		t.Fatal("expected error when no pods match the selector")
 	}
 }
+
+func TestLogFetcher_GetSelectedPodLogsAllNamespaces(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		ga := action.(clientgotesting.GenericAction)
+		opts := ga.GetValue().(*corev1.PodLogOptions)
+		return true, &runtime.Unknown{Raw: []byte("INFO from " + opts.Container)}, nil
+	})
+
+	mk := func(ns, name string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{"app": "api"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
+		}
+	}
+	for _, p := range []*corev1.Pod{mk("team-a", "api-1"), mk("team-b", "api-2")} {
+		if _, err := clientset.CoreV1().Pods(p.Namespace).Create(context.Background(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "", false, false, &buf)
+	fetcher.FilterLevel = logging.DEBUG
+	fetcher.AllNamespaces = true
+	if err := fetcher.GetSelectedPodLogs(context.Background(), "app=api"); err != nil {
+		t.Fatalf("GetSelectedPodLogs error: %v", err)
+	}
+
+	out := buf.String()
+	// Prefix must be namespace-qualified across namespaces.
+	if !strings.Contains(out, "team-a/api-1") || !strings.Contains(out, "team-b/api-2") {
+		t.Fatalf("expected namespace-qualified prefixes, got:\n%s", out)
+	}
+	if got := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1; got != 2 {
+		t.Fatalf("expected 2 streams across namespaces, got %d:\n%s", got, out)
+	}
+}
