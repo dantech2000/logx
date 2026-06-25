@@ -22,7 +22,17 @@ type ContainerInfo struct {
 	Status string
 	// Image is the container image
 	Image string
+	// Kind distinguishes init and ephemeral containers from regular ones. It is
+	// empty for a regular container, "init" for an init container, and
+	// "ephemeral" for an ephemeral (debug) container.
+	Kind string
 }
+
+// Container kinds reported in ContainerInfo.Kind.
+const (
+	containerKindInit      = "init"
+	containerKindEphemeral = "ephemeral"
+)
 
 // GetContainerState returns a string representation of the container state
 func GetContainerState(state corev1.ContainerState) string {
@@ -30,19 +40,36 @@ func GetContainerState(state corev1.ContainerState) string {
 		return "Running"
 	}
 	if state.Waiting != nil {
-		return fmt.Sprintf("Waiting (%s)", state.Waiting.Reason)
+		return stateWithReason("Waiting", state.Waiting.Reason)
 	}
 	if state.Terminated != nil {
-		return fmt.Sprintf("Terminated (%s)", state.Terminated.Reason)
+		return stateWithReason("Terminated", state.Terminated.Reason)
 	}
 	return "Unknown"
 }
 
-// GetContainerStatus returns the ready state and status string for a container
+// stateWithReason formats a container state, appending the reason in parentheses
+// only when one is present (avoids an empty "Waiting ()").
+func stateWithReason(state, reason string) string {
+	if reason == "" {
+		return state
+	}
+	return fmt.Sprintf("%s (%s)", state, reason)
+}
+
+// GetContainerStatus returns the ready state and status string for a container,
+// searching regular, init, and ephemeral container statuses.
 func GetContainerStatus(pod *corev1.Pod, containerName string) (bool, string) {
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.Name == containerName {
-			return status.Ready, GetContainerState(status.State)
+	statusGroups := [][]corev1.ContainerStatus{
+		pod.Status.ContainerStatuses,
+		pod.Status.InitContainerStatuses,
+		pod.Status.EphemeralContainerStatuses,
+	}
+	for _, group := range statusGroups {
+		for _, status := range group {
+			if status.Name == containerName {
+				return status.Ready, GetContainerState(status.State)
+			}
 		}
 	}
 	return false, "Unknown"
@@ -61,9 +88,15 @@ func FormatContainerInfo(info ContainerInfo) string {
 		readySymbol = "✓"
 	}
 
-	return fmt.Sprintf("%s %s [%s] (%s)",
+	kindTag := ""
+	if info.Kind != "" {
+		kindTag = " " + terminal.Sanitize("["+info.Kind+"]")
+	}
+
+	return fmt.Sprintf("%s %s%s [%s] (%s)",
 		statusColor.Sprint(readySymbol),
 		terminal.Sanitize(info.Name),
+		kindTag,
 		terminal.Sanitize(info.Status),
 		terminal.Sanitize(info.Image))
 }
@@ -75,16 +108,48 @@ func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespa
 		return nil, fmt.Errorf("error fetching pod details: %w", err)
 	}
 
-	containers := make([]ContainerInfo, len(pod.Spec.Containers))
-	for i, container := range pod.Spec.Containers {
-		ready, status := GetContainerStatus(pod, container.Name)
-		containers[i] = ContainerInfo{
-			Name:   container.Name,
-			Ready:  ready,
-			Status: status,
-			Image:  container.Image,
-		}
+	var containers []ContainerInfo
+	for _, container := range pod.Spec.Containers {
+		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, ""))
+	}
+	for _, container := range pod.Spec.InitContainers {
+		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, containerKindInit))
+	}
+	for _, container := range pod.Spec.EphemeralContainers {
+		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, containerKindEphemeral))
 	}
 
 	return containers, nil
+}
+
+// podHasContainer reports whether the pod defines a container with the given
+// name, including init and ephemeral containers (which also have fetchable logs).
+func podHasContainer(pod *corev1.Pod, name string) bool {
+	for _, c := range pod.Spec.Containers {
+		if c.Name == name {
+			return true
+		}
+	}
+	for _, c := range pod.Spec.InitContainers {
+		if c.Name == name {
+			return true
+		}
+	}
+	for _, c := range pod.Spec.EphemeralContainers {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func containerInfoFor(pod *corev1.Pod, name, image, kind string) ContainerInfo {
+	ready, status := GetContainerStatus(pod, name)
+	return ContainerInfo{
+		Name:   name,
+		Ready:  ready,
+		Status: status,
+		Image:  image,
+		Kind:   kind,
+	}
 }

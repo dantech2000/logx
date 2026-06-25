@@ -123,14 +123,7 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) error {
 		return fmt.Errorf("error fetching pod details: %w", err)
 	}
 
-	containerExists := false
-	for _, container := range pod.Spec.Containers {
-		if container.Name == lf.ContainerName {
-			containerExists = true
-			break
-		}
-	}
-	if !containerExists {
+	if !podHasContainer(pod, lf.ContainerName) {
 		return fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
 	}
 

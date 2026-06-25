@@ -38,8 +38,8 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 				"app [Running] (ghcr.io/example/app:v2)",
 				"sidecar [Waiting (CrashLoopBackOff)] (ghcr.io/example/sidecar:v1)",
 				"worker [Terminated (Error)] (ghcr.io/example/worker:v3)",
+				"migrate [init] [Unknown] (ghcr.io/example/migrate:v1)",
 			},
-			hidden: []string{"migrate"},
 		},
 		{
 			name:   "json",
@@ -49,8 +49,9 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 				`"namespace": "default"`,
 				`"name": "sidecar"`,
 				`"status": "Waiting (CrashLoopBackOff)"`,
+				`"name": "migrate"`,
+				`"kind": "init"`,
 			},
-			hidden: []string{"migrate"},
 		},
 		{
 			name:   "yaml",
@@ -60,14 +61,14 @@ func TestOutputFormatterFormatsContainerFixtures(t *testing.T) {
 				"namespace: default",
 				"name: worker",
 				"status: Terminated (Error)",
+				"name: migrate",
+				"kind: init",
 			},
-			hidden: []string{"migrate"},
 		},
 		{
 			name:     "posix",
 			format:   "posix",
-			expected: []string{"app\nsidecar\nworker"},
-			hidden:   []string{"migrate"},
+			expected: []string{"app\nsidecar\nworker\nmigrate"},
 		},
 	}
 

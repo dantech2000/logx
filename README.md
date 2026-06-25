@@ -7,7 +7,7 @@
 - Smart log parsing for JSON, logfmt, bracketed, klog/glog, common/combined and Envoy access logs, syslog priority, and plain-text logs
 - Timestamp and log-level detection
 - Colorized, readable output
-- Multi-container pod support with interactive selection
+- Multi-container pod support with interactive selection, including init and ephemeral containers
 - Previous container logs with `-p`
 - Live log following with `-f`
 - Container listing with JSON, YAML, and POSIX output

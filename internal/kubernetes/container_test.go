@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -8,7 +9,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clientgotesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 )
 
@@ -27,14 +30,14 @@ func TestListContainersFromPodFixtures(t *testing.T) {
 			},
 		},
 		{
-			name:    "multi container statuses",
+			name:    "multi container statuses with an init container",
 			fixture: "testdata/pods/multi-container-statuses.yaml",
 			want: []ContainerInfo{
 				{Name: "app", Ready: true, Status: "Running", Image: "ghcr.io/example/app:v2"},
 				{Name: "sidecar", Ready: false, Status: "Waiting (CrashLoopBackOff)", Image: "ghcr.io/example/sidecar:v1"},
 				{Name: "worker", Ready: false, Status: "Terminated (Error)", Image: "ghcr.io/example/worker:v3"},
+				{Name: "migrate", Ready: false, Status: "Unknown", Image: "ghcr.io/example/migrate:v1", Kind: "init"},
 			},
-			notWanted: []string{"migrate"},
 		},
 	}
 
@@ -136,6 +139,47 @@ func TestFormatContainerInfoSanitizes(t *testing.T) {
 	got := FormatContainerInfo(ContainerInfo{Name: "app", Ready: true, Status: "Running", Image: "img\x1b[31m"})
 	if strings.Contains(got, "\x1b") {
 		t.Fatalf("FormatContainerInfo leaked an escape byte: %q", got)
+	}
+}
+
+func TestGetLogsAcceptsInitContainer(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "migrate", Image: "img"}},
+			Containers:     []corev1.Container{{Name: "app", Image: "img"}},
+		},
+	}
+	clientset := fake.NewSimpleClientset(pod)
+	clientset.PrependReactor("get", "pods/log", func(clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte("2026-06-24T10:00:00Z INFO migrating schema")}, nil
+	})
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
+	fetcher.ContainerName = "migrate" // an init container
+
+	if err := fetcher.GetLogs(context.Background()); err != nil {
+		t.Fatalf("GetLogs() for init container error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "migrating schema") {
+		t.Fatalf("init container logs missing: %q", buf.String())
+	}
+}
+
+func TestGetLogsRejectsUnknownContainer(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "img"}}},
+	}
+	clientset := fake.NewSimpleClientset(pod)
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
+	fetcher.ContainerName = "nope"
+
+	if err := fetcher.GetLogs(context.Background()); err == nil {
+		t.Fatal("GetLogs() with unknown container = nil error, want error")
 	}
 }
 

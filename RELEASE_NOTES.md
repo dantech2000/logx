@@ -18,6 +18,9 @@
 
 ## Added
 
+- Support init and ephemeral containers: `logx containers` now lists them
+  (tagged `[init]`/`[ephemeral]`, and with a `kind` field in `-o json`/`-o yaml`),
+  and `logx logs -c <init-or-ephemeral-container>` can fetch their logs.
 - Recognize the klog/glog format used by Kubernetes components (e.g.
   `E0624 10:00:02.333 12 server.go:42] failed to sync`), mapping the I/W/E/F
   level letter to the log level instead of treating the line as level-less.

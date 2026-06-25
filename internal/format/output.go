@@ -35,6 +35,9 @@ type containerDTO struct {
 	Ready  bool   `json:"ready" yaml:"ready"`
 	Status string `json:"status" yaml:"status"`
 	Image  string `json:"image" yaml:"image"`
+	// Kind is "init" or "ephemeral" for those container types; omitted for
+	// regular containers.
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
 }
 
 func (of *OutputFormatter) toDTO() containerListDTO {
@@ -45,6 +48,7 @@ func (of *OutputFormatter) toDTO() containerListDTO {
 			Ready:  c.Ready,
 			Status: terminal.Sanitize(c.Status),
 			Image:  terminal.Sanitize(c.Image),
+			Kind:   terminal.Sanitize(c.Kind),
 		}
 	}
 	return containerListDTO{
