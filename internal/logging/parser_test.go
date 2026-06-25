@@ -500,6 +500,33 @@ func TestParseLogEntryKlogDoesNotMisparsePlainText(t *testing.T) {
 	}
 }
 
+func TestParseLogEntryAccessLog(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+		wantMatch bool // true if it should be recognized as an access log
+	}{
+		{"2xx is debug", `192.0.2.10 - - [24/Jun/2026:10:12:00 +0000] "GET /ok HTTP/1.1" 200 1043`, DEBUG, true},
+		{"4xx is warn", `203.0.113.5 - - [24/Jun/2026:10:12:01 +0000] "GET /missing HTTP/1.1" 404 153`, WARN, true},
+		{"5xx is error", `198.51.100.7 - - [24/Jun/2026:10:12:02 +0000] "POST /api HTTP/1.1" 500 87`, ERROR, true},
+		{"dash size accepted", `h - - [d] "GET /x HTTP/1.1" 304 -`, DEBUG, true},
+		{"prose with status-like number is not an access log", `received "POST data" 500 records processed`, DEBUG, false},
+		{"quoted phrase then count is not an access log", `the user said "GET out" 200 times`, DEBUG, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if got.LevelDetected != tt.wantMatch {
+				t.Errorf("LevelDetected = %v, want %v (recognized as access log?)", got.LevelDetected, tt.wantMatch)
+			}
+		})
+	}
+}
+
 func TestFilterAndFormatLogsSkipsBlankLines(t *testing.T) {
 	input := strings.NewReader("INFO one\n\n   \n\t\nINFO two\n")
 	var buf bytes.Buffer

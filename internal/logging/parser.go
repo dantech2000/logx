@@ -98,6 +98,7 @@ var logParsers = []logParser{
 	bracketedLogParser{},
 	logfmtLogParser{},
 	klogLogParser{},
+	accessLogParser{},
 }
 
 var (
@@ -243,6 +244,39 @@ func (klogLogParser) Parse(line string) (LogEntry, bool) {
 		Level:         klogLevel(matches[1]),
 		LevelDetected: true,
 		Message:       matches[2],
+		Format:        FormatPlainText,
+		RawLine:       line,
+	}, true
+}
+
+type accessLogParser struct{}
+
+// accessLogStatusRegex matches the request + status + response-size portion of
+// the Apache/nginx common and combined log formats, e.g.
+// `"GET /path HTTP/1.1" 404 153`. Requiring the HTTP method and the trailing size
+// (a byte count or "-") keeps the match specific enough to avoid false positives
+// on ordinary prose that merely contains a quoted phrase and a number.
+var accessLogStatusRegex = regexp.MustCompile(`"(?:GET|HEAD|POST|PUT|DELETE|PATCH|OPTIONS|CONNECT|TRACE) [^"]*"\s+(\d{3})\s+(?:\d+|-)`)
+
+func (accessLogParser) Parse(line string) (LogEntry, bool) {
+	matches := accessLogStatusRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return LogEntry{}, false
+	}
+	status, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return LogEntry{}, false
+	}
+	level, ok := statusClassLevel(status)
+	if !ok {
+		return LogEntry{}, false
+	}
+	// The whole line is the useful record (client, request, status, size), and it
+	// carries its own non-ISO date, so display it as-is with the derived level.
+	return LogEntry{
+		Level:         level,
+		LevelDetected: true,
+		Message:       line,
 		Format:        FormatPlainText,
 		RawLine:       line,
 	}, true
@@ -420,10 +454,15 @@ func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
 		return DEBUG, false
 	}
 
-	// Map by status class. 5xx is an error, 4xx a warning. 1xx/2xx/3xx are
-	// successful/informational requests and are intentionally classified as
-	// DEBUG so high-volume access logs stay out of the default INFO view; raise
-	// verbosity to --level DEBUG to see them.
+	return statusClassLevel(status)
+}
+
+// statusClassLevel maps an HTTP status code to a level by class. 5xx is an error,
+// 4xx a warning. 1xx/2xx/3xx are successful/informational requests and are
+// intentionally classified as DEBUG so high-volume access logs stay out of the
+// default INFO view; raise verbosity to --level DEBUG to see them. The bool is
+// false for values outside the valid status range (not a real status).
+func statusClassLevel(status int) (LogLevel, bool) {
 	switch {
 	case status >= 500:
 		return ERROR, true
