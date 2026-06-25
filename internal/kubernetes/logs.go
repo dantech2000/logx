@@ -188,7 +188,8 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	defer func() { _ = podLogs.Close() }()
 
 	// Drive the shared pipeline over the stream, one line at a time.
-	logWriter := NewLogWriterWithPipeline(lf.Writer, lf.newPipeline())
+	pipeline := lf.newPipeline()
+	logWriter := NewLogWriterWithPipeline(lf.Writer, pipeline)
 	scanner := logging.NewLineReader(podLogs)
 	for scanner.Scan() {
 		if _, err := logWriter.Write([]byte(scanner.Text())); err != nil {
@@ -198,6 +199,10 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("error reading log stream: %w", err)
+	}
+
+	if stats := pipeline.Stats(); stats != nil {
+		return stats.Write(lf.Writer)
 	}
 
 	return nil

@@ -17,6 +17,7 @@ func addFilterFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArrayP(flagWhere, "w", nil, "Keep entries matching a field predicate, e.g. status>=500 (repeatable; AND)")
 	cmd.Flags().StringSliceP(flagFields, "F", nil, "Project output to only these fields, e.g. ts,level,msg")
 	cmd.Flags().StringP(flagOutput, "o", "text", "Output format: text or json")
+	cmd.Flags().Bool(flagStats, false, "Print a summary digest (level/status/top-message counts) instead of the lines")
 }
 
 // buildPipelineOptions assembles PipelineOptions from the filter flags for the
@@ -70,6 +71,11 @@ func buildPipelineOptions(cmd *cobra.Command, minLevel logging.LogLevel) (loggin
 		return opts, err
 	}
 	opts.Output, err = logging.ParseOutputFormat(outStr)
+	if err != nil {
+		return opts, err
+	}
+
+	opts.CollectStats, err = cmd.Flags().GetBool(flagStats)
 	if err != nil {
 		return opts, err
 	}

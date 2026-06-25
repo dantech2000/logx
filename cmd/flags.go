@@ -28,4 +28,5 @@ const (
 	flagAllContainers = "all-containers"
 	flagSelector      = "selector"
 	flagAllNamespaces = "all-namespaces"
+	flagStats         = "stats"
 )

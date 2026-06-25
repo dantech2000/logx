@@ -55,7 +55,14 @@ func runParse(cmd *cobra.Command, args []string) error {
 	}
 	defer closeFn()
 
-	return logging.NewPipeline(opts).Run(reader, cmd.OutOrStdout())
+	pipeline := logging.NewPipeline(opts)
+	if err := pipeline.Run(reader, cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	if stats := pipeline.Stats(); stats != nil {
+		return stats.Write(cmd.OutOrStdout())
+	}
+	return nil
 }
 
 // openLogSource returns the log input: the named file, or stdin when no file (or

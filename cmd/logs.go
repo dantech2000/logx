@@ -17,6 +17,7 @@ type logOptions struct {
 	allContainers bool
 	selector      string
 	allNamespaces bool
+	stats         bool
 	follow        bool
 	level         string
 	podName       string
@@ -131,6 +132,11 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting all-namespaces flag: %w", err)
 	}
 
+	stats, err := cmd.Flags().GetBool(flagStats)
+	if err != nil {
+		return nil, fmt.Errorf("error getting stats flag: %w", err)
+	}
+
 	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
@@ -161,6 +167,7 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		allContainers: allContainers,
 		selector:      selector,
 		allNamespaces: allNamespaces,
+		stats:         stats,
 		follow:        follow,
 		level:         level,
 		podName:       podName,
@@ -249,6 +256,9 @@ func validateLogOptions(o *logOptions) error {
 	}
 	if o.allNamespaces && o.selector == "" {
 		return errors.New("--all-namespaces requires --selector")
+	}
+	if o.stats && (o.allContainers || o.selector != "") {
+		return errors.New("--stats is not supported with --all-containers or --selector")
 	}
 	return nil
 }

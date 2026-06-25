@@ -20,6 +20,7 @@ import (
 type Pipeline struct {
 	opts    PipelineOptions
 	tracker LevelTracker
+	stats   *Stats
 }
 
 // PipelineOptions configures a Pipeline. The zero value emits every non-blank
@@ -43,12 +44,22 @@ type PipelineOptions struct {
 	Fields []string
 	// Output selects the rendering format (text or JSON/NDJSON).
 	Output OutputFormat
+	// CollectStats accumulates a digest over kept entries and suppresses normal
+	// per-line output; the caller writes the summary after the run via Stats().
+	CollectStats bool
 }
 
 // NewPipeline returns a Pipeline configured by opts.
 func NewPipeline(opts PipelineOptions) *Pipeline {
-	return &Pipeline{opts: opts}
+	p := &Pipeline{opts: opts}
+	if opts.CollectStats {
+		p.stats = NewStats()
+	}
+	return p
 }
+
+// Stats returns the accumulated digest, or nil if CollectStats was not set.
+func (p *Pipeline) Stats() *Stats { return p.stats }
 
 // ProcessLine handles a single raw log line (without a trailing newline) and
 // returns the rendered output and whether it should be emitted. Blank or
@@ -64,6 +75,11 @@ func (p *Pipeline) ProcessLine(rawLine string) (string, bool) {
 	entry := ParseKubernetesLogEntry(rawLine)
 	entry.Level = p.tracker.Effective(entry, rawLine)
 	if !p.keep(entry, rawLine) {
+		return "", false
+	}
+	if p.stats != nil {
+		p.stats.Record(entry)
+		// In stats mode the digest is the output; suppress the per-line render.
 		return "", false
 	}
 	return p.render(entry), true

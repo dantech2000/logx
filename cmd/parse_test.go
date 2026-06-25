@@ -173,3 +173,23 @@ func TestRunParseRejectsBadWhere(t *testing.T) {
 		t.Fatal("expected an error for a --where expression with no operator")
 	}
 }
+
+func TestRunParseStats(t *testing.T) {
+	const sample = "INFO ok\nERROR boom 1\nERROR boom 2\n"
+	var buf bytes.Buffer
+	cmd := newParseCmd(strings.NewReader(sample), &buf)
+	cmd.SetArgs([]string{"--stats"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("parse --stats error = %v", err)
+	}
+	out := buf.String()
+	// Stats mode replaces the per-line output with a digest.
+	if strings.Contains(out, "[INFO]") {
+		t.Fatalf("--stats should suppress per-line output:\n%s", out)
+	}
+	for _, want := range []string{"logx stats", "lines: 3", "ERROR 2", "INFO 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stats output missing %q:\n%s", want, out)
+		}
+	}
+}
