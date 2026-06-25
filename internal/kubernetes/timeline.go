@@ -164,9 +164,14 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 	defer func() { _ = podLogs.Close() }()
 
 	var items []timelineItem
+	var tracker logging.LevelTracker
 	scanner := logging.NewLineScanner(podLogs)
 	for scanner.Scan() {
-		entry := logging.ParseKubernetesLogEntry(scanner.Text())
+		rawLine := scanner.Text()
+		entry := logging.ParseKubernetesLogEntry(rawLine)
+		// Continuation lines inherit the level of the entry they belong to so a
+		// multi-line entry (e.g. a stack trace) is filtered as a unit.
+		entry.Level = tracker.Effective(entry, rawLine)
 		if entry.Level < lf.FilterLevel {
 			continue
 		}

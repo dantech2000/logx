@@ -29,6 +29,11 @@ type LogEntry struct {
 	Fields    map[string]interface{}
 	Timestamp time.Time
 	RawLine   string // Original payload used as fallback display text.
+	// LevelDetected reports whether Level came from the line itself (an explicit
+	// level marker, level field, or HTTP status) rather than being defaulted.
+	// Continuation lines of a multi-line entry have no level of their own, so this
+	// is false for them, which lets consumers group them with the preceding entry.
+	LevelDetected bool
 }
 
 // Common field mappings for different JSON log formats
@@ -166,12 +171,13 @@ func (bracketedLogParser) Parse(line string) (LogEntry, bool) {
 
 	message, fields := splitTrailingFields(matches[4])
 	entry := LogEntry{
-		Level:   level,
-		Message: message,
-		Format:  FormatBracketed,
-		Logger:  matches[3],
-		Fields:  fields,
-		RawLine: line,
+		Level:         level,
+		LevelDetected: true,
+		Message:       message,
+		Format:        FormatBracketed,
+		Logger:        matches[3],
+		Fields:        fields,
+		RawLine:       line,
 	}
 	if ts, err := parseTimestamp(matches[1]); err == nil {
 		entry.Timestamp = ts
@@ -196,6 +202,7 @@ func (logfmtLogParser) Parse(line string) (LogEntry, bool) {
 	if levelValue, ok := firstStringField(fields, "level", "severity", "log_level", "lvl"); ok {
 		if level, err := ParseLogLevel(levelValue); err == nil {
 			entry.Level = level
+			entry.LevelDetected = true
 		}
 	}
 	if message, ok := firstStringField(fields, "msg", "message", "log"); ok {
@@ -253,26 +260,29 @@ func parseJSONLog(line string, data map[string]interface{}) LogEntry {
 		Logger:  logger,
 		RawLine: line,
 	}
-	entry.Level = parseJSONLevel(data)
+	entry.Level, entry.LevelDetected = parseJSONLevel(data)
 	entry.Message = parseJSONMessage(line, data)
 	entry.Timestamp = parseJSONTimestamp(data)
 
 	return entry
 }
 
-func parseJSONLevel(data map[string]interface{}) LogLevel {
+// parseJSONLevel resolves the level from a JSON log object and reports whether a
+// level was actually found (via a level field or HTTP status) rather than
+// defaulted to DEBUG.
+func parseJSONLevel(data map[string]interface{}) (LogLevel, bool) {
 	for _, field := range jsonLevelFields {
 		if val, ok := fieldValue(data, field); ok {
 			levelStr := fmt.Sprintf("%v", val)
 			if level, err := ParseLogLevel(levelStr); err == nil {
-				return level
+				return level, true
 			}
 		}
 	}
 	if level, ok := parseHTTPStatusLevel(data); ok {
-		return level
+		return level, true
 	}
-	return DEBUG
+	return DEBUG, false
 }
 
 func parseJSONMessage(line string, data map[string]interface{}) string {
@@ -415,6 +425,7 @@ func parsePlainTextLog(line string) LogEntry {
 	if matches := plainTextLevelRegex.FindStringSubmatch(line); matches != nil {
 		if level, err := ParseLogLevel(matches[2]); err == nil {
 			entry.Level = level
+			entry.LevelDetected = true
 		}
 	}
 
@@ -548,13 +559,13 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 // ParseLogEntry parses a single log line, trying each known format parser in
 // order and falling back to plain-text parsing if none match.
 //
-// Parsing is intentionally stateless and line-oriented: each line is classified
-// independently. A consequence is that continuation lines of a multi-line entry
-// (e.g. the body of a Java/Go stack trace) carry no level of their own and are
-// classified as DEBUG, so they are hidden when filtering at a higher --level
-// even when the preceding header line is an ERROR. Grouping continuation lines
-// with their parent entry would require stateful, format-specific heuristics and
-// is left as a deliberate future enhancement rather than a fragile guess.
+// Parsing is stateless and line-oriented: each line is classified independently,
+// and LevelDetected records whether a level was actually found. Multi-line entries
+// (e.g. a stack trace) are reassembled by the caller: an indented continuation
+// line has no level of its own, so a LevelTracker carries the preceding entry's
+// level to it. Flush-left lines without a detected level remain independent, so
+// the one case still classified as DEBUG is an unindented continuation line such
+// as a Java exception-class header.
 func ParseLogEntry(line string) LogEntry {
 	for _, parser := range logParsers {
 		if entry, ok := parser.Parse(line); ok {

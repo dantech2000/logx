@@ -206,16 +206,29 @@ func TestLogFetcher_GetLogsFiltersByLevel(t *testing.T) {
 					expected: []string{"request accepted", "request failed", "RuntimeException", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
 				},
 				{
-					name:     "INFO hides continuation lines without levels",
+					// Indented continuation frames inherit their parent's level, so
+					// the ERROR stack frames and the WARN continuation stay visible at
+					// INFO; only the flush-left exception-class line (which has no
+					// level and no indentation) is treated as an independent DEBUG
+					// line and hidden.
+					name:     "INFO keeps indented frames, hides flush-left continuation",
 					level:    logging.INFO,
-					hidden:   []string{"RuntimeException", "Client.call", "Handler.handle", "retry attempt 2"},
-					expected: []string{"request accepted", "request failed", "retry scheduled"},
+					hidden:   []string{"RuntimeException"},
+					expected: []string{"request accepted", "request failed", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
 				},
 				{
-					name:     "WARN hides info and continuation lines",
+					name:     "WARN hides info and the flush-left continuation",
 					level:    logging.WARN,
-					hidden:   []string{"request accepted", "RuntimeException", "Client.call", "Handler.handle", "retry attempt 2"},
-					expected: []string{"request failed", "retry scheduled"},
+					hidden:   []string{"request accepted", "RuntimeException"},
+					expected: []string{"request failed", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
+				},
+				{
+					// The whole ERROR stack trace (the indented frames) is visible at
+					// ERROR, which is the key win of continuation grouping.
+					name:     "ERROR keeps the indented stack frames",
+					level:    logging.ERROR,
+					hidden:   []string{"request accepted", "RuntimeException", "retry scheduled", "retry attempt 2"},
+					expected: []string{"request failed", "Client.call", "Handler.handle"},
 				},
 			},
 		},

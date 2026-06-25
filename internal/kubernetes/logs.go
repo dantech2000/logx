@@ -127,17 +127,23 @@ func (lf *LogFetcher) hasPreviousContainer(ctx context.Context, containerName st
 type LogWriter struct {
 	writer      io.Writer
 	filterLevel logging.LogLevel
+	tracker     logging.LevelTracker
 }
 
 // Write implements io.Writer interface
 func (w *LogWriter) Write(p []byte) (n int, err error) {
-	// Convert bytes to string and parse log
-	logLine := strings.TrimSpace(string(p))
+	// Keep the untrimmed line so indentation (which marks continuation lines) is
+	// preserved, then trim for parsing.
+	rawLine := string(p)
+	logLine := strings.TrimSpace(rawLine)
 	if logLine == "" {
 		return len(p), nil
 	}
 
 	entry := logging.ParseLogEntry(logLine)
+	// Continuation lines (e.g. indented stack-trace frames) inherit the level of
+	// the entry they belong to so they are filtered and shown together with it.
+	entry.Level = w.tracker.Effective(entry, rawLine)
 	if entry.Level < w.filterLevel {
 		return len(p), nil
 	}
