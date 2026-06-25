@@ -112,6 +112,27 @@ func FormatLogLevelLabel(level LogLevel) string {
 	return levelColorFor(level).Sprint(fmt.Sprintf("[%s]", level))
 }
 
+// prefixPalette colors stream labels (container/pod names) in merged output. The
+// colors are picked to stay distinct from the level colors.
+var prefixPalette = []*color.Color{
+	color.New(color.FgHiCyan),
+	color.New(color.FgHiGreen),
+	color.New(color.FgHiYellow),
+	color.New(color.FgHiMagenta),
+	color.New(color.FgHiBlue),
+	color.New(color.FgHiRed),
+}
+
+// ColorizePrefix renders a stream label (e.g. a container or pod name) in a
+// stable palette color chosen by idx, so each stream keeps a consistent color
+// when several are merged. The label is sanitized; color obeys the global switch.
+func ColorizePrefix(label string, idx int) string {
+	if idx < 0 {
+		idx = 0
+	}
+	return prefixPalette[idx%len(prefixPalette)].Sprint(terminal.Sanitize(label))
+}
+
 // FormatProjectedEntry renders only the requested keys of an entry as
 // `key=value` pairs in the given order (the --fields projection). Virtual keys
 // (level, message, logger, timestamp) are supported alongside structured fields;

@@ -112,3 +112,25 @@ func TestGetLogOptionsRejectsInvalidLevel(t *testing.T) {
 		t.Fatal("ParseLogLevel() error = nil, want error")
 	}
 }
+
+func TestValidateLogOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    logOptions
+		wantErr bool
+	}{
+		{"plain", logOptions{}, false},
+		{"all-containers alone", logOptions{allContainers: true}, false},
+		{"timeline+follow", logOptions{timeline: true, follow: true}, true},
+		{"all-containers+container", logOptions{allContainers: true, container: "app"}, true},
+		{"all-containers+timeline", logOptions{allContainers: true, timeline: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLogOptions(&tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateLogOptions(%+v) error = %v, wantErr %v", tt.opts, err, tt.wantErr)
+			}
+		})
+	}
+}

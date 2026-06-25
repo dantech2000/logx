@@ -13,12 +13,13 @@ import (
 
 // logOptions holds the command options for the logs command
 type logOptions struct {
-	container string
-	follow    bool
-	level     string
-	podName   string
-	previous  bool
-	timeline  bool
+	container     string
+	allContainers bool
+	follow        bool
+	level         string
+	podName       string
+	previous      bool
+	timeline      bool
 }
 
 var logsCmd = &cobra.Command{
@@ -42,6 +43,7 @@ func init() {
 
 func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP(flagContainer, "c", "", "Specific container name within the pod")
+	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
@@ -107,6 +109,11 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting container flag: %w", err)
 	}
 
+	allContainers, err := cmd.Flags().GetBool(flagAllContainers)
+	if err != nil {
+		return nil, fmt.Errorf("error getting all-containers flag: %w", err)
+	}
+
 	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
@@ -128,12 +135,13 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 	}
 
 	return &logOptions{
-		container: container,
-		follow:    follow,
-		level:     level,
-		podName:   args[0],
-		previous:  previous,
-		timeline:  timeline,
+		container:     container,
+		allContainers: allContainers,
+		follow:        follow,
+		level:         level,
+		podName:       args[0],
+		previous:      previous,
+		timeline:      timeline,
 	}, nil
 }
 
@@ -173,18 +181,35 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if options.timeline && options.follow {
-		return errors.New("--timeline cannot be used with --follow")
+	if err := validateLogOptions(options); err != nil {
+		return err
 	}
 
-	if options.timeline {
+	switch {
+	case options.allContainers:
+		err = logFetcher.GetAllContainerLogs(cmd.Context())
+	case options.timeline:
 		err = logFetcher.GetTimeline(cmd.Context())
-	} else {
+	default:
 		err = logFetcher.GetLogs(cmd.Context())
 	}
 	if err != nil {
 		return fmt.Errorf("error fetching logs: %w", err)
 	}
 
+	return nil
+}
+
+// validateLogOptions rejects mutually exclusive flag combinations.
+func validateLogOptions(o *logOptions) error {
+	if o.timeline && o.follow {
+		return errors.New("--timeline cannot be used with --follow")
+	}
+	if o.allContainers && o.container != "" {
+		return errors.New("--all-containers cannot be combined with --container")
+	}
+	if o.allContainers && o.timeline {
+		return errors.New("--all-containers cannot be combined with --timeline")
+	}
 	return nil
 }

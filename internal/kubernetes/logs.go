@@ -176,17 +176,7 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 		return err
 	}
 
-	// Now proceed with log fetching
-	podLogOpts := corev1.PodLogOptions{
-		Container:    lf.ContainerName,
-		Follow:       lf.Follow,
-		Previous:     lf.Previous,
-		Timestamps:   lf.Timestamps,
-		SinceSeconds: lf.SinceSeconds,
-		SinceTime:    lf.SinceTime,
-		TailLines:    lf.TailLines,
-	}
-
+	podLogOpts := lf.podLogOptions(lf.ContainerName)
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
 	podLogs, err := req.Stream(ctx)
 	if err != nil {
@@ -194,11 +184,8 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 	defer func() { _ = podLogs.Close() }()
 
-	// Drive the shared pipeline over the stream, one line at a time. The level
-	// is authoritative from FilterLevel; the rest of the filters come from Filters.
-	pipelineOpts := lf.Filters
-	pipelineOpts.MinLevel = lf.FilterLevel
-	logWriter := NewLogWriterWithPipeline(lf.Writer, logging.NewPipeline(pipelineOpts))
+	// Drive the shared pipeline over the stream, one line at a time.
+	logWriter := NewLogWriterWithPipeline(lf.Writer, lf.newPipeline())
 	scanner := logging.NewLineReader(podLogs)
 	for scanner.Scan() {
 		if _, err := logWriter.Write([]byte(scanner.Text())); err != nil {
@@ -211,4 +198,27 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// podLogOptions builds the PodLogOptions for a container from the fetcher's
+// settings. Shared by single- and multi-stream paths so the log window is
+// defined in one place.
+func (lf *LogFetcher) podLogOptions(container string) corev1.PodLogOptions {
+	return corev1.PodLogOptions{
+		Container:    container,
+		Follow:       lf.Follow,
+		Previous:     lf.Previous,
+		Timestamps:   lf.Timestamps,
+		SinceSeconds: lf.SinceSeconds,
+		SinceTime:    lf.SinceTime,
+		TailLines:    lf.TailLines,
+	}
+}
+
+// newPipeline builds the shared logging pipeline from the fetcher's filters,
+// with the level taken authoritatively from FilterLevel.
+func (lf *LogFetcher) newPipeline() *logging.Pipeline {
+	opts := lf.Filters
+	opts.MinLevel = lf.FilterLevel
+	return logging.NewPipeline(opts)
 }

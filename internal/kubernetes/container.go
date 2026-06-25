@@ -122,6 +122,22 @@ func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespa
 	return containers, nil
 }
 
+// podContainerNames returns every container name whose logs can be fetched —
+// regular, then init, then ephemeral — in a stable order.
+func podContainerNames(pod *corev1.Pod) []string {
+	names := make([]string, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers))
+	for _, c := range pod.Spec.Containers {
+		names = append(names, c.Name)
+	}
+	for _, c := range pod.Spec.InitContainers {
+		names = append(names, c.Name)
+	}
+	for _, c := range pod.Spec.EphemeralContainers {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
 // podHasContainer reports whether the pod defines a container with the given
 // name, including init and ephemeral containers (which also have fetchable logs).
 func podHasContainer(pod *corev1.Pod, name string) bool {
