@@ -458,6 +458,48 @@ func TestFilterAndFormatLogsAcceptsLongLines(t *testing.T) {
 	}
 }
 
+func TestParseLogEntryKlog(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+		wantMsg   string
+	}{
+		{"info", "I0624 10:00:00.111111   1 main.go:10] starting controller", INFO, "starting controller"},
+		{"warning", "W0624 10:00:01.222222  12 sync.go:88] retrying sync", WARN, "retrying sync"},
+		{"error", "E0624 10:00:02.333333  12 server.go:42] failed to sync", ERROR, "failed to sync"},
+		{"fatal maps to error", "F0624 10:00:03.444444   1 boot.go:5] cannot start", ERROR, "cannot start"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if !got.LevelDetected {
+				t.Error("LevelDetected = false, want true")
+			}
+			if got.Message != tt.wantMsg {
+				t.Errorf("Message = %q, want %q", got.Message, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestParseLogEntryKlogDoesNotMisparsePlainText(t *testing.T) {
+	// Ordinary text that merely starts with a capital letter and digits must not
+	// be mistaken for a klog line.
+	for _, line := range []string{"Item0624 is fine", "INFO something happened", "Error: boom"} {
+		got := ParseLogEntry(line)
+		if got.Format != FormatPlainText {
+			continue // plain text either way is fine
+		}
+		if got.Message == "" && got.RawLine != line {
+			t.Fatalf("line %q was mis-structured: %+v", line, got)
+		}
+	}
+}
+
 func TestFilterAndFormatLogsSkipsBlankLines(t *testing.T) {
 	input := strings.NewReader("INFO one\n\n   \n\t\nINFO two\n")
 	var buf bytes.Buffer

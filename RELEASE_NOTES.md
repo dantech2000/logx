@@ -18,6 +18,9 @@
 
 ## Added
 
+- Recognize the klog/glog format used by Kubernetes components (e.g.
+  `E0624 10:00:02.333 12 server.go:42] failed to sync`), mapping the I/W/E/F
+  level letter to the log level instead of treating the line as level-less.
 - `logx parse [file]` reads logs from a file or stdin and renders them with the
   same parsing, multi-line grouping, and `--level` filtering as `logx logs` — no
   cluster required. It also recognizes a leading `kubectl logs --timestamps`

@@ -4,7 +4,7 @@
 
 ## Features
 
-- Smart log parsing for JSON and plain-text logs
+- Smart log parsing for JSON, logfmt, bracketed, klog/glog, and plain-text logs
 - Timestamp and log-level detection
 - Colorized, readable output
 - Multi-container pod support with interactive selection

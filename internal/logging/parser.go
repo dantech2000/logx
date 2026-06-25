@@ -97,6 +97,7 @@ var logParsers = []logParser{
 	jsonLogParser{},
 	bracketedLogParser{},
 	logfmtLogParser{},
+	klogLogParser{},
 }
 
 var (
@@ -220,6 +221,42 @@ func (logfmtLogParser) Parse(line string) (LogEntry, bool) {
 	}
 
 	return entry, true
+}
+
+type klogLogParser struct{}
+
+// klogLineRegex matches the klog/glog header used by Kubernetes components:
+//
+//	Lmmdd hh:mm:ss.uuuuuu threadid file:line] message
+//
+// e.g. "E0624 10:00:00.123456   12 server.go:42] failed to sync". The level
+// letter (I/W/E/F) carries the severity; the year is omitted by klog, so the
+// timestamp is left for the caller (the timeline supplies kubelet timestamps).
+var klogLineRegex = regexp.MustCompile(`^([IWEF])\d{4} \d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\S+:\d+\]\s?(.*)$`)
+
+func (klogLogParser) Parse(line string) (LogEntry, bool) {
+	matches := klogLineRegex.FindStringSubmatch(line)
+	if matches == nil {
+		return LogEntry{}, false
+	}
+	return LogEntry{
+		Level:         klogLevel(matches[1]),
+		LevelDetected: true,
+		Message:       matches[2],
+		Format:        FormatPlainText,
+		RawLine:       line,
+	}, true
+}
+
+func klogLevel(letter string) LogLevel {
+	switch letter {
+	case "W":
+		return WARN
+	case "E", "F":
+		return ERROR
+	default: // "I"
+		return INFO
+	}
 }
 
 // detectLoggerLabel returns a display label for known structured logging formats.
