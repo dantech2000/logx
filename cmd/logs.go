@@ -15,6 +15,7 @@ import (
 type logOptions struct {
 	container     string
 	allContainers bool
+	selector      string
 	follow        bool
 	level         string
 	podName       string
@@ -26,8 +27,11 @@ var logsCmd = &cobra.Command{
 	Use:   "logs [pod-name]",
 	Short: "Display logs for a Kubernetes pod",
 	Long: `Display logs for a Kubernetes pod. You can filter logs by level using the --level flag.
-Supported levels are DEBUG, INFO, WARN, and ERROR.`,
-	Args: cobra.ExactArgs(1),
+Supported levels are TRACE, DEBUG, INFO, WARN, ERROR, and FATAL.
+
+Provide a pod name, or use --selector to stream logs from all pods matching a
+label selector.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runLogs,
 }
 
@@ -43,6 +47,7 @@ func init() {
 
 func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP(flagContainer, "c", "", "Specific container name within the pod")
+	cmd.Flags().String(flagSelector, "", "Label selector (e.g. app=api); streams logs from all matching pods")
 	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
@@ -114,6 +119,11 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting all-containers flag: %w", err)
 	}
 
+	selector, err := cmd.Flags().GetString(flagSelector)
+	if err != nil {
+		return nil, fmt.Errorf("error getting selector flag: %w", err)
+	}
+
 	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
@@ -134,12 +144,18 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting timeline flag: %w", err)
 	}
 
+	podName := ""
+	if len(args) > 0 {
+		podName = args[0]
+	}
+
 	return &logOptions{
 		container:     container,
 		allContainers: allContainers,
+		selector:      selector,
 		follow:        follow,
 		level:         level,
-		podName:       args[0],
+		podName:       podName,
 		previous:      previous,
 		timeline:      timeline,
 	}, nil
@@ -186,6 +202,8 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	switch {
+	case options.selector != "":
+		err = logFetcher.GetSelectedPodLogs(cmd.Context(), options.selector)
 	case options.allContainers:
 		err = logFetcher.GetAllContainerLogs(cmd.Context())
 	case options.timeline:
@@ -200,8 +218,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateLogOptions rejects mutually exclusive flag combinations.
+// validateLogOptions rejects mutually exclusive or incomplete flag combinations.
 func validateLogOptions(o *logOptions) error {
+	if o.podName == "" && o.selector == "" {
+		return errors.New("provide a pod name or use --selector")
+	}
 	if o.timeline && o.follow {
 		return errors.New("--timeline cannot be used with --follow")
 	}
@@ -210,6 +231,12 @@ func validateLogOptions(o *logOptions) error {
 	}
 	if o.allContainers && o.timeline {
 		return errors.New("--all-containers cannot be combined with --timeline")
+	}
+	if o.selector != "" && o.timeline {
+		return errors.New("--selector cannot be combined with --timeline")
+	}
+	if o.selector != "" && o.podName != "" {
+		return errors.New("provide either a pod name or --selector, not both")
 	}
 	return nil
 }

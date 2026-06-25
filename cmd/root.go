@@ -33,7 +33,11 @@ Use "logx [command] --help" for more information about a command.`,
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return cmd.Help()
+			// With no pod name, only proceed if a label selector was given;
+			// otherwise show help.
+			if selector, _ := cmd.Flags().GetString(flagSelector); selector == "" {
+				return cmd.Help()
+			}
 		}
 		return runLogs(cmd, args)
 	},

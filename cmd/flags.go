@@ -26,4 +26,5 @@ const (
 	flagTail          = "tail"
 	flagTimestamps    = "timestamps"
 	flagAllContainers = "all-containers"
+	flagSelector      = "selector"
 )

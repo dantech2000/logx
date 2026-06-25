@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/dantech2000/logx/internal/logging"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,6 +29,7 @@ func (lf *LogFetcher) GetAllContainerLogs(ctx context.Context) error {
 	streams := make([]prefixedStream, len(names))
 	for i, name := range names {
 		streams[i] = prefixedStream{
+			pod:       lf.PodName,
 			container: name,
 			prefix:    logging.ColorizePrefix(name, i) + " ",
 		}
@@ -35,9 +37,56 @@ func (lf *LogFetcher) GetAllContainerLogs(ctx context.Context) error {
 	return lf.fanInStreams(ctx, streams)
 }
 
-// prefixedStream describes one container log stream and the prefix to tag its
-// lines with in the merged output.
+// GetSelectedPodLogs streams logs from every pod matching the label selector,
+// across each pod's containers, merging them onto the writer with a color-coded
+// "pod" (or "pod/container") prefix. Streams from the same pod share a color.
+func (lf *LogFetcher) GetSelectedPodLogs(ctx context.Context, selector string) error {
+	pods, err := lf.Clientset.CoreV1().Pods(lf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return fmt.Errorf("error listing pods for selector %q: %w", selector, err)
+	}
+	if len(pods.Items) == 0 {
+		return fmt.Errorf("no pods match selector %q in namespace %q", selector, lf.Namespace)
+	}
+
+	var streams []prefixedStream
+	for podIdx := range pods.Items {
+		pod := &pods.Items[podIdx]
+		containers := lf.containersToStream(pod)
+		for _, c := range containers {
+			label := pod.Name
+			if len(containers) > 1 {
+				label = pod.Name + "/" + c
+			}
+			streams = append(streams, prefixedStream{
+				pod:       pod.Name,
+				container: c,
+				prefix:    logging.ColorizePrefix(label, podIdx) + " ",
+			})
+		}
+	}
+	if len(streams) == 0 {
+		return fmt.Errorf("no matching containers to stream for selector %q", selector)
+	}
+	return lf.fanInStreams(ctx, streams)
+}
+
+// containersToStream picks which of a pod's containers to read: just the named
+// one when --container is set (skipping pods that lack it), otherwise all of them.
+func (lf *LogFetcher) containersToStream(pod *corev1.Pod) []string {
+	if lf.ContainerName != "" {
+		if podHasContainer(pod, lf.ContainerName) {
+			return []string{lf.ContainerName}
+		}
+		return nil
+	}
+	return podContainerNames(pod)
+}
+
+// prefixedStream describes one container log stream (in a named pod) and the
+// prefix to tag its lines with in the merged output.
 type prefixedStream struct {
+	pod       string
 	container string
 	prefix    string
 }
@@ -69,10 +118,10 @@ func (lf *LogFetcher) fanInStreams(ctx context.Context, streams []prefixedStream
 // because the pipeline is stateful (multi-line grouping).
 func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *sync.Mutex) error {
 	opts := lf.podLogOptions(s.container)
-	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &opts)
+	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(s.pod, &opts)
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return fmt.Errorf("error opening log stream for container %q: %w", s.container, err)
+		return fmt.Errorf("error opening log stream for %s/%s: %w", s.pod, s.container, err)
 	}
 	defer func() { _ = stream.Close() }()
 

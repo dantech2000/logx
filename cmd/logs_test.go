@@ -119,11 +119,15 @@ func TestValidateLogOptions(t *testing.T) {
 		opts    logOptions
 		wantErr bool
 	}{
-		{"plain", logOptions{}, false},
-		{"all-containers alone", logOptions{allContainers: true}, false},
-		{"timeline+follow", logOptions{timeline: true, follow: true}, true},
-		{"all-containers+container", logOptions{allContainers: true, container: "app"}, true},
-		{"all-containers+timeline", logOptions{allContainers: true, timeline: true}, true},
+		{"plain", logOptions{podName: "p"}, false},
+		{"all-containers alone", logOptions{podName: "p", allContainers: true}, false},
+		{"selector alone", logOptions{selector: "app=api"}, false},
+		{"neither pod nor selector", logOptions{}, true},
+		{"timeline+follow", logOptions{podName: "p", timeline: true, follow: true}, true},
+		{"all-containers+container", logOptions{podName: "p", allContainers: true, container: "app"}, true},
+		{"all-containers+timeline", logOptions{podName: "p", allContainers: true, timeline: true}, true},
+		{"selector+timeline", logOptions{selector: "app=api", timeline: true}, true},
+		{"selector+podname", logOptions{selector: "app=api", podName: "p"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
