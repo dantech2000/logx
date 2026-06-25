@@ -458,9 +458,9 @@ func TestLogFetcher_GetTimelineSortsLogsAndEvents(t *testing.T) {
 	// Only the target pod's own events should appear, interleaved with its logs.
 	assertInOrder(t, got, []string{
 		"[2026-05-15 00:38:01] [EVENT] [Normal] pod/test-pod Scheduled: Successfully assigned default/test-pod",
-		"[2026-05-15 00:38:02] [LOG] [INFO] INFO application started",
+		"[2026-05-15 00:38:02] [LOG] [INFO] application started",
 		"[2026-05-15 00:38:03] [EVENT] [Warning] pod/test-pod Unhealthy: Readiness probe failed",
-		"[2026-05-15 00:38:04] [LOG] [ERROR] ERROR request failed",
+		"[2026-05-15 00:38:04] [LOG] [ERROR] request failed",
 	})
 	// Events belonging to other objects in the namespace must be excluded.
 	for _, unwanted := range []string{"other-pod", "targetgroupbinding"} {
@@ -1022,7 +1022,7 @@ func TestLogWriter_Write(t *testing.T) {
 		{
 			name:     "Plain text log",
 			input:    "2024-03-15T12:19:57Z DEBUG test message",
-			wantLogs: "[2024-03-15 12:19:57] [DEBUG] 2024-03-15T12:19:57Z DEBUG test message\n",
+			wantLogs: "[2024-03-15 12:19:57] [DEBUG] test message\n",
 		},
 		{
 			name:     "JSON log",
@@ -1037,7 +1037,7 @@ func TestLogWriter_Write(t *testing.T) {
 		{
 			name:     "Log with extra whitespace",
 			input:    "  2024-03-15T12:19:57Z DEBUG test message  ",
-			wantLogs: "[2024-03-15 12:19:57] [DEBUG] 2024-03-15T12:19:57Z DEBUG test message\n",
+			wantLogs: "[2024-03-15 12:19:57] [DEBUG] test message\n",
 		},
 	}
 

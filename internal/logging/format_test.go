@@ -93,6 +93,44 @@ func TestFormatLogEntryDetailsLogfmtWithoutMessage(t *testing.T) {
 	}
 }
 
+func TestFormatLogEntryDoesNotDuplicateTimestampAndLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		// fragment that must appear exactly once (the message), and the leading
+		// timestamp/level text that must NOT appear in the details.
+		message string
+		dupes   []string
+	}{
+		{
+			name:    "bare timestamp + level",
+			input:   "2026-06-24 10:06:00 INFO  Starting application v1.4.2",
+			message: "Starting application v1.4.2",
+			dupes:   []string{"2026-06-24 10:06:00", "INFO "},
+		},
+		{
+			name:    "two-bracket form",
+			input:   "[2026-06-24 10:00:00] [ERROR] disk full on /data",
+			message: "disk full on /data",
+			dupes:   []string{"[ERROR]", "[2026-06-24 10:00:00]"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatLogEntry(ParseLogEntry(tt.input))
+			details := FormatLogEntryDetails(ParseLogEntry(tt.input))
+			if !strings.Contains(got, tt.message) {
+				t.Fatalf("output missing message %q: %q", tt.message, got)
+			}
+			for _, d := range tt.dupes {
+				if strings.Contains(details, d) {
+					t.Fatalf("details duplicated leading %q: %q", d, details)
+				}
+			}
+		})
+	}
+}
+
 func TestFormatLogEntryNormalizesTimestampToUTC(t *testing.T) {
 	// A timestamp in a non-UTC zone (as epoch values parse to local time) must be
 	// displayed in UTC for consistency with the timeline output.

@@ -105,11 +105,15 @@ func formatJSONDetails(entry LogEntry) string {
 }
 
 func formatPlainTextDetails(entry LogEntry) string {
-	rawLine := terminal.Sanitize(entry.RawLine)
-	if entry.Level == ERROR || containsAttentionText(entry.RawLine) {
-		return errorColor.Sprint(rawLine)
+	message := entry.Message
+	if message == "" {
+		message = entry.RawLine
 	}
-	return rawLine
+	sanitized := terminal.Sanitize(message)
+	if entry.Level == ERROR || containsAttentionText(message) {
+		return errorColor.Sprint(sanitized)
+	}
+	return sanitized
 }
 
 func jsonMessage(entry LogEntry) string {

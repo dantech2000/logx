@@ -417,23 +417,62 @@ func parsePlainTextLog(line string) LogEntry {
 	}
 
 	// First try to extract timestamp
-	if timeStr := plainTextTimestampRegex.FindString(line); timeStr != "" {
+	timeStr := plainTextTimestampRegex.FindString(line)
+	if timeStr != "" {
 		if ts, err := parseTimestamp(timeStr); err == nil {
 			entry.Timestamp = ts
 		}
 	}
 
 	// Try to extract log level
+	levelStr := ""
 	if matches := plainTextLevelRegex.FindStringSubmatch(line); matches != nil {
 		if level, err := ParseLogLevel(matches[2]); err == nil {
 			entry.Level = level
 			entry.LevelDetected = true
+			levelStr = matches[2]
 		}
 	}
 
-	// Use the original line as the message
-	entry.Message = line
+	// Build the display message by removing a leading timestamp/level that logx
+	// already prints as its own [timestamp] [LEVEL] prefix, so they are not shown
+	// twice. Only a leading occurrence is stripped, so message content is safe.
+	entry.Message = stripLeadingMeta(line, timeStr, levelStr)
 	return entry
+}
+
+// stripLeadingMeta removes a leading timestamp and/or level token (each optionally
+// wrapped in [ ]) from the start of a plaintext line. If stripping would leave
+// nothing, the trimmed original line is returned.
+func stripLeadingMeta(line, timeStr, levelStr string) string {
+	s := line
+	if timeStr != "" {
+		s = stripPrefixToken(s, timeStr)
+	}
+	if levelStr != "" {
+		s = stripPrefixToken(s, levelStr)
+	}
+	if strings.TrimSpace(s) == "" {
+		return strings.TrimSpace(line)
+	}
+	return strings.TrimSpace(s)
+}
+
+// stripPrefixToken removes tok from the start of s, allowing it to be wrapped in
+// square brackets and surrounded by spaces. If s does not begin with tok (after
+// leading whitespace), s is returned unchanged.
+func stripPrefixToken(s, tok string) string {
+	rest := strings.TrimLeft(s, " \t")
+	if bracketed := "[" + tok + "]"; strings.HasPrefix(rest, bracketed) {
+		return strings.TrimLeft(rest[len(bracketed):], " \t")
+	}
+	if strings.HasPrefix(rest, tok) {
+		after := rest[len(tok):]
+		if after == "" || after[0] == ' ' || after[0] == '\t' {
+			return strings.TrimLeft(after, " \t")
+		}
+	}
+	return s
 }
 
 func splitTrailingFields(message string) (string, map[string]interface{}) {

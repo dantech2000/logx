@@ -1,2 +1,2 @@
-[2026-05-15 00:38:03] [WARN] 2026-05-15T00:38:03Z WARN upstream latency high
-[2026-05-15 00:38:04] [ERROR] 2026-05-15T00:38:04Z ERROR upstream unavailable
+[2026-05-15 00:38:03] [WARN] upstream latency high
+[2026-05-15 00:38:04] [ERROR] upstream unavailable
