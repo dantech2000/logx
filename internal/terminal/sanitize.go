@@ -3,6 +3,7 @@ package terminal
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Sanitize makes untrusted text safe to print to a terminal by escaping
@@ -10,13 +11,27 @@ import (
 // control characters and DEL (which carry ANSI escape sequences), it neutralizes
 // Unicode characters used for visual spoofing: bidirectional overrides
 // (Trojan-Source), zero-width characters, and the U+2028/U+2029 line separators.
+//
+// Invalid UTF-8 bytes are escaped too (e.g. a raw 0x9B, the C1 CSI), so the
+// result is always valid UTF-8 with no raw control bytes — decoding via the
+// `range` operator alone would silently turn such bytes into U+FFFD and could
+// leave the raw byte in the output via the unchanged fast path.
 func Sanitize(value string) string {
 	var builder strings.Builder
 	changed := false
 
-	for _, r := range value {
+	for i := 0; i < len(value); {
+		r, size := utf8.DecodeRuneInString(value[i:])
+		if r == utf8.RuneError && size == 1 {
+			// Invalid UTF-8 byte: escape the raw byte and move on.
+			changed = true
+			fmt.Fprintf(&builder, `\x%02X`, value[i])
+			i++
+			continue
+		}
 		if r == '\t' {
 			builder.WriteRune(r)
+			i += size
 			continue
 		}
 		if isUnsafeRune(r) {
@@ -26,9 +41,11 @@ func Sanitize(value string) string {
 			} else {
 				fmt.Fprintf(&builder, `\u%04X`, r)
 			}
+			i += size
 			continue
 		}
 		builder.WriteRune(r)
+		i += size
 	}
 
 	if !changed {
