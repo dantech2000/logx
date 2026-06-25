@@ -1065,8 +1065,7 @@ func TestLogWriter_Write(t *testing.T) {
 
 func TestLogWriter_WriteFiltersByLevel(t *testing.T) {
 	var buf bytes.Buffer
-	writer := NewLogWriter(&buf)
-	writer.filterLevel = logging.WARN
+	writer := NewLogWriterWithPipeline(&buf, logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.WARN}))
 
 	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z INFO hidden")); err != nil {
 		t.Fatalf("Write() info error = %v", err)
