@@ -95,11 +95,14 @@ type logParser interface {
 var logParsers = []logParser{
 	// Ordered from most structured to least structured. Plain text is the fallback.
 	jsonLogParser{},
+	yamlFlowParser{}, // brace-wrapped like JSON; tried right after it
 	bracketedLogParser{},
 	logfmtLogParser{},
 	klogLogParser{},
 	syslogParser{},
 	accessLogParser{},
+	xmlLogParser{}, // heuristic structured formats last, before the plain-text fallback
+	csvLogParser{},
 }
 
 var (
