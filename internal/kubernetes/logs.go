@@ -47,6 +47,9 @@ type LogFetcher struct {
 	SinceSeconds *int64
 	SinceTime    *metav1.Time
 	TailLines    *int64
+	// MaxConcurrency bounds how many container log streams are read at once in
+	// --all-containers/--selector mode. Zero or negative means the package default.
+	MaxConcurrency int
 	// Writer is where the logs will be written
 	Writer io.Writer
 }
@@ -228,5 +231,17 @@ func (lf *LogFetcher) podLogOptions(container string) corev1.PodLogOptions {
 func (lf *LogFetcher) newPipeline() *logging.Pipeline {
 	opts := lf.Filters
 	opts.MinLevel = lf.FilterLevel
+	return logging.NewPipeline(opts)
+}
+
+// newStreamPipeline builds a per-stream pipeline. When shared is non-nil the
+// pipeline records into that shared (thread-safe) Stats so --stats aggregates
+// across every concurrent stream; otherwise it behaves like newPipeline.
+func (lf *LogFetcher) newStreamPipeline(shared *logging.Stats) *logging.Pipeline {
+	opts := lf.Filters
+	opts.MinLevel = lf.FilterLevel
+	if shared != nil {
+		return logging.NewPipelineWithStats(opts, shared)
+	}
 	return logging.NewPipeline(opts)
 }

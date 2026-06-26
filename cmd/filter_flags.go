@@ -18,6 +18,7 @@ func addFilterFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSliceP(flagFields, "F", nil, "Project output to only these fields, e.g. ts,level,msg")
 	cmd.Flags().StringP(flagOutput, "o", "text", "Output format: text or json")
 	cmd.Flags().Bool(flagStats, false, "Print a summary digest (level/status/top-message counts) instead of the lines")
+	registerFilterFlagCompletions(cmd)
 }
 
 // buildPipelineOptions assembles PipelineOptions from the filter flags for the

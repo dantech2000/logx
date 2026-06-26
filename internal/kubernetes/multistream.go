@@ -121,8 +121,16 @@ type prefixedStream struct {
 	prefix    string
 }
 
-// fanInStreams runs each stream concurrently, serializing writes to the shared
-// writer, and returns the first error encountered.
+// defaultMaxConcurrency bounds how many container log streams are read at once
+// when no --max-concurrency is given. It keeps a wide --selector/--all-containers
+// fan-out from opening hundreds of simultaneous API requests.
+const defaultMaxConcurrency = 10
+
+// fanInStreams runs the streams through a bounded worker pool, serializing writes
+// to the shared writer, and returns the first error encountered. When --stats is
+// set every worker records into a single thread-safe Stats and the aggregated
+// digest is written once after all streams finish (per-line output is suppressed
+// in stats mode, so nothing is interleaved before it).
 func (lf *LogFetcher) fanInStreams(ctx context.Context, streams []prefixedStream) error {
 	var (
 		mu       sync.Mutex // serializes writes to lf.Writer
@@ -130,23 +138,63 @@ func (lf *LogFetcher) fanInStreams(ctx context.Context, streams []prefixedStream
 		errOnce  sync.Once
 		firstErr error
 	)
-	for _, s := range streams {
-		wg.Add(1)
-		go func(s prefixedStream) {
-			defer wg.Done()
-			if err := lf.streamPrefixed(ctx, s, &mu); err != nil {
-				errOnce.Do(func() { firstErr = err })
-			}
-		}(s)
+
+	var shared *logging.Stats
+	if lf.Filters.CollectStats {
+		shared = logging.NewStats()
 	}
+
+	workers := lf.effectiveMaxConcurrency(len(streams))
+	jobs := make(chan prefixedStream)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for s := range jobs {
+				if err := lf.streamPrefixed(ctx, s, &mu, shared); err != nil {
+					errOnce.Do(func() { firstErr = err })
+				}
+			}
+		}()
+	}
+	for _, s := range streams {
+		jobs <- s
+	}
+	close(jobs)
 	wg.Wait()
-	return firstErr
+
+	if firstErr != nil {
+		return firstErr
+	}
+	if shared != nil {
+		return shared.Write(lf.Writer)
+	}
+	return nil
+}
+
+// effectiveMaxConcurrency resolves the worker count for streamCount streams:
+// MaxConcurrency when set (else the default), never more than the number of
+// streams and never below one.
+func (lf *LogFetcher) effectiveMaxConcurrency(streamCount int) int {
+	limit := lf.MaxConcurrency
+	if limit <= 0 {
+		limit = defaultMaxConcurrency
+	}
+	if limit > streamCount {
+		limit = streamCount
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return limit
 }
 
 // streamPrefixed reads one container's logs through a private pipeline and writes
 // each emitted line, prefixed, to w under mu. Each stream needs its own pipeline
-// because the pipeline is stateful (multi-line grouping).
-func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *sync.Mutex) error {
+// because the pipeline is stateful (multi-line grouping). When shared is non-nil
+// the pipeline records into it instead of producing per-line output, so --stats
+// aggregates across every stream.
+func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *sync.Mutex, shared *logging.Stats) error {
 	opts := lf.podLogOptions(s.container)
 	req := lf.Clientset.CoreV1().Pods(s.namespace).GetLogs(s.pod, &opts)
 	stream, err := req.Stream(ctx)
@@ -155,7 +203,7 @@ func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *
 	}
 	defer func() { _ = stream.Close() }()
 
-	pipeline := lf.newPipeline()
+	pipeline := lf.newStreamPipeline(shared)
 	scanner := logging.NewLineReader(stream)
 	for scanner.Scan() {
 		out, ok := pipeline.ProcessLine(scanner.Text())

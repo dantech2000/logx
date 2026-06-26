@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dantech2000/logx/internal/kubernetes"
@@ -85,5 +86,79 @@ func TestCompleteContainerNamesNoArgs(t *testing.T) {
 	_, directive := completeContainerNames(completionTestCmd(t), nil, "")
 	if directive != cobra.ShellCompDirectiveError {
 		t.Fatalf("directive = %v, want Error when no pod arg is given", directive)
+	}
+}
+
+func TestStaticFlagCompletion(t *testing.T) {
+	complete := staticFlagCompletion("dark", "light")
+
+	all, directive := complete(nil, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v, want NoFileComp", directive)
+	}
+	if !slices.Equal(all, []string{"dark", "light"}) {
+		t.Fatalf("values = %v, want [dark light]", all)
+	}
+
+	filtered, _ := complete(nil, nil, "da")
+	if !slices.Equal(filtered, []string{"dark"}) {
+		t.Fatalf("prefix-filtered = %v, want [dark]", filtered)
+	}
+
+	if none, _ := complete(nil, nil, "zzz"); len(none) != 0 {
+		t.Fatalf("non-matching prefix = %v, want empty", none)
+	}
+}
+
+func TestCompleteFieldList(t *testing.T) {
+	// A bare prefix completes a field name.
+	got, directive := completeFieldList(nil, nil, "lev")
+	if directive&cobra.ShellCompDirectiveNoSpace == 0 {
+		t.Fatalf("directive = %v, want NoSpace set", directive)
+	}
+	if !slices.Contains(got, "level") {
+		t.Fatalf("completions = %v, want to contain level", got)
+	}
+
+	// A comma-separated list completes only the trailing element while preserving
+	// the already-typed prefix.
+	got, _ = completeFieldList(nil, nil, "ts,msg,lev")
+	for _, v := range got {
+		if !strings.HasPrefix(v, "ts,msg,") {
+			t.Fatalf("completion %q dropped the existing fields prefix", v)
+		}
+	}
+	if !slices.Contains(got, "ts,msg,level") {
+		t.Fatalf("completions = %v, want to contain ts,msg,level", got)
+	}
+}
+
+func TestCompleteWhereField(t *testing.T) {
+	// Before any operator, offer field-name hints with NoSpace so the operator can
+	// be appended.
+	got, directive := completeWhereField(nil, nil, "stat")
+	if directive&cobra.ShellCompDirectiveNoSpace == 0 {
+		t.Fatalf("directive = %v, want NoSpace set", directive)
+	}
+	if !slices.Contains(got, "status") || !slices.Contains(got, "status_code") {
+		t.Fatalf("completions = %v, want status hints", got)
+	}
+
+	// Once an operator is typed there is a value we cannot predict, so stop hinting.
+	if got, _ := completeWhereField(nil, nil, "status>="); len(got) != 0 {
+		t.Fatalf("expected no hints once an operator is present, got %v", got)
+	}
+}
+
+// TestRegisteredFlagCompletions checks the new flags are actually wired to their
+// completion functions on the built commands (not just that the helpers exist).
+func TestRegisteredFlagCompletions(t *testing.T) {
+	cmd := &cobra.Command{Use: "logs"}
+	addLogFlags(cmd)
+
+	for _, flag := range []string{flagLevel, flagOutput, flagFields, flagWhere} {
+		if _, ok := cmd.GetFlagCompletionFunc(flag); !ok {
+			t.Fatalf("flag --%s has no registered completion function", flag)
+		}
 	}
 }

@@ -170,6 +170,7 @@ func FuzzParseFieldPredicate(f *testing.F) {
 	for _, seed := range []string{
 		"status>=500", "level==ERROR", "a~=(", "", ">=", "x", "a=b=c",
 		"path~=/v2>=1", "  msg != hi ", "n<=", "level~=.*",
+		">=5", "<=10", "!=x", "==5", ">>>=", "~=~=",
 	} {
 		f.Add(seed)
 	}
@@ -178,6 +179,11 @@ func FuzzParseFieldPredicate(f *testing.F) {
 		fp, err := ParseFieldPredicate(expr)
 		if err != nil {
 			return // rejecting bad input is the expected outcome
+		}
+		// An accepted predicate must never carry a key made only of operator
+		// characters (the ">=5" class of parsing artifacts).
+		if isPureOperatorKey(fp.key) {
+			t.Fatalf("accepted a pure-operator key %q from %q", fp.key, expr)
 		}
 		_ = fp.Eval(sample) // must not panic
 		_ = fp.Eval(ParseLogEntry("plain text line"))

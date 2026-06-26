@@ -7,14 +7,20 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Stats accumulates a digest over the entries a pipeline keeps: counts by level,
 // HTTP status classes, the most frequent (templated) messages, and the time
-// span. It is written once at the end of a run by --stats. It is not safe for
-// concurrent use; --stats is single-stream.
+// span. It is written once at the end of a run by --stats.
+//
+// A single Stats may be shared by several concurrent pipelines (one per stream
+// in --all-containers/--selector mode); Record is guarded by a mutex so the
+// aggregate is correct across streams. Total/Write are also guarded, though they
+// are normally called only after every stream has finished.
 type Stats struct {
+	mu          sync.Mutex
 	total       int
 	byLevel     map[LogLevel]int
 	statusClass map[int]int // keyed by class (2,3,4,5) → count
@@ -37,8 +43,11 @@ var (
 	statsNumberRegex = regexp.MustCompile(`\d+`)
 )
 
-// Record folds one kept entry into the digest.
+// Record folds one kept entry into the digest. It is safe to call concurrently
+// from multiple streams.
 func (s *Stats) Record(entry LogEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.total++
 	s.byLevel[entry.Level]++
 
@@ -62,7 +71,11 @@ func (s *Stats) Record(entry LogEntry) {
 }
 
 // Total reports how many entries were recorded.
-func (s *Stats) Total() int { return s.total }
+func (s *Stats) Total() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.total
+}
 
 // messageOf returns the best display message for stats grouping.
 func messageOf(entry LogEntry) string {
@@ -117,6 +130,8 @@ func toInt(v interface{}) (int, bool) {
 // with the active theme (so they obey --no-color), ordered from most to least
 // severe.
 func (s *Stats) Write(w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var b strings.Builder
 	fmt.Fprintln(&b, quoteColor().Sprint("── logx stats ──"))
 	fmt.Fprintf(&b, "lines: %d", s.total)

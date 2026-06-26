@@ -81,6 +81,12 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 	if key == "" {
 		return FieldPredicate{}, fmt.Errorf("missing field name in %q", expr)
 	}
+	// Guard against an expression like ">=5", where the chosen operator ("=") leaves
+	// a key made only of operator characters (">"). That is never a real field name;
+	// reject it instead of silently filtering on a field named ">".
+	if isPureOperatorKey(key) {
+		return FieldPredicate{}, fmt.Errorf("missing field name in %q (the field name reads as an operator; write field%svalue, e.g. status>=500)", expr, token)
+	}
 
 	fp := FieldPredicate{key: key, op: op, val: val}
 	switch op {
@@ -96,6 +102,24 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 		}
 	}
 	return fp, nil
+}
+
+// operatorRunes are the characters that make up the comparison/match operators.
+// A field key composed solely of these is a parsing artifact, not a real name.
+const operatorRunes = "<>=!~"
+
+// isPureOperatorKey reports whether key is non-empty and made up entirely of
+// operator characters, e.g. ">" left over from parsing ">=5".
+func isPureOperatorKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if !strings.ContainsRune(operatorRunes, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // leftmostOperator returns the operator that appears earliest in expr (longest

@@ -114,20 +114,30 @@ func TestGetLogOptionsRejectsInvalidLevel(t *testing.T) {
 }
 
 func TestValidateLogOptions(t *testing.T) {
+	// The real command always supplies --max-concurrency (default 10); set a valid
+	// value on every fixture so these flag-combination cases are realistic, then
+	// exercise the max-concurrency bound explicitly below.
+	const okConc = 10
 	tests := []struct {
 		name    string
 		opts    logOptions
 		wantErr bool
 	}{
-		{"plain", logOptions{podName: "p"}, false},
-		{"all-containers alone", logOptions{podName: "p", allContainers: true}, false},
-		{"selector alone", logOptions{selector: "app=api"}, false},
-		{"neither pod nor selector", logOptions{}, true},
-		{"timeline+follow", logOptions{podName: "p", timeline: true, follow: true}, true},
-		{"all-containers+container", logOptions{podName: "p", allContainers: true, container: "app"}, true},
-		{"all-containers+timeline", logOptions{podName: "p", allContainers: true, timeline: true}, true},
-		{"selector+timeline", logOptions{selector: "app=api", timeline: true}, true},
-		{"selector+podname", logOptions{selector: "app=api", podName: "p"}, true},
+		{"plain", logOptions{podName: "p", maxConcurrency: okConc}, false},
+		{"all-containers alone", logOptions{podName: "p", allContainers: true, maxConcurrency: okConc}, false},
+		{"selector alone", logOptions{selector: "app=api", maxConcurrency: okConc}, false},
+		{"stats+all-containers", logOptions{podName: "p", allContainers: true, stats: true, maxConcurrency: okConc}, false},
+		{"stats+selector", logOptions{selector: "app=api", stats: true, maxConcurrency: okConc}, false},
+		{"neither pod nor selector", logOptions{maxConcurrency: okConc}, true},
+		{"timeline+follow", logOptions{podName: "p", timeline: true, follow: true, maxConcurrency: okConc}, true},
+		{"all-containers+container", logOptions{podName: "p", allContainers: true, container: "app", maxConcurrency: okConc}, true},
+		{"all-containers+timeline", logOptions{podName: "p", allContainers: true, timeline: true, maxConcurrency: okConc}, true},
+		{"selector+timeline", logOptions{selector: "app=api", timeline: true, maxConcurrency: okConc}, true},
+		{"selector+podname", logOptions{selector: "app=api", podName: "p", maxConcurrency: okConc}, true},
+		{"stats+timeline", logOptions{podName: "p", stats: true, timeline: true, maxConcurrency: okConc}, true},
+		{"max-concurrency zero", logOptions{podName: "p", maxConcurrency: 0}, true},
+		{"max-concurrency negative", logOptions{podName: "p", maxConcurrency: -1}, true},
+		{"max-concurrency one", logOptions{podName: "p", maxConcurrency: 1}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,10 +150,10 @@ func TestValidateLogOptions(t *testing.T) {
 }
 
 func TestValidateLogOptionsAllNamespaces(t *testing.T) {
-	if err := validateLogOptions(&logOptions{allNamespaces: true}); err == nil {
+	if err := validateLogOptions(&logOptions{allNamespaces: true, maxConcurrency: 10}); err == nil {
 		t.Fatal("--all-namespaces without --selector should error")
 	}
-	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api"}); err != nil {
+	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api", maxConcurrency: 10}); err != nil {
 		t.Fatalf("--all-namespaces with --selector should be valid, got %v", err)
 	}
 }

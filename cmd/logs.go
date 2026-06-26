@@ -13,16 +13,17 @@ import (
 
 // logOptions holds the command options for the logs command
 type logOptions struct {
-	container     string
-	allContainers bool
-	selector      string
-	allNamespaces bool
-	stats         bool
-	follow        bool
-	level         string
-	podName       string
-	previous      bool
-	timeline      bool
+	container      string
+	allContainers  bool
+	selector       string
+	allNamespaces  bool
+	stats          bool
+	maxConcurrency int
+	follow         bool
+	level          string
+	podName        string
+	previous       bool
+	timeline       bool
 }
 
 var logsCmd = &cobra.Command{
@@ -52,12 +53,14 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().String(flagSelector, "", "Label selector (e.g. app=api); streams logs from all matching pods")
 	cmd.Flags().BoolP(flagAllNamespaces, "A", false, "With --selector, match pods across all namespaces")
 	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
+	cmd.Flags().Int(flagMaxConcurrency, 10, "Max container log streams read at once with --all-containers/--selector")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
 	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
 	addFilterFlags(cmd)
 	addLogQueryFlags(cmd)
+	registerLevelCompletion(cmd)
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -137,6 +140,11 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, fmt.Errorf("error getting stats flag: %w", err)
 	}
 
+	maxConcurrency, err := cmd.Flags().GetInt(flagMaxConcurrency)
+	if err != nil {
+		return nil, fmt.Errorf("error getting max-concurrency flag: %w", err)
+	}
+
 	follow, err := cmd.Flags().GetBool(flagFollow)
 	if err != nil {
 		return nil, fmt.Errorf("error getting follow flag: %w", err)
@@ -163,16 +171,17 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 	}
 
 	return &logOptions{
-		container:     container,
-		allContainers: allContainers,
-		selector:      selector,
-		allNamespaces: allNamespaces,
-		stats:         stats,
-		follow:        follow,
-		level:         level,
-		podName:       podName,
-		previous:      previous,
-		timeline:      timeline,
+		container:      container,
+		allContainers:  allContainers,
+		selector:       selector,
+		allNamespaces:  allNamespaces,
+		stats:          stats,
+		maxConcurrency: maxConcurrency,
+		follow:         follow,
+		level:          level,
+		podName:        podName,
+		previous:       previous,
+		timeline:       timeline,
 	}, nil
 }
 
@@ -209,6 +218,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.FilterLevel = filterLevel
 	logFetcher.Filters = pipelineOptions
 	logFetcher.AllNamespaces = options.allNamespaces
+	logFetcher.MaxConcurrency = options.maxConcurrency
 	if err := applyLogQuery(cmd, logFetcher); err != nil {
 		return err
 	}
@@ -257,8 +267,11 @@ func validateLogOptions(o *logOptions) error {
 	if o.allNamespaces && o.selector == "" {
 		return errors.New("--all-namespaces requires --selector")
 	}
-	if o.stats && (o.allContainers || o.selector != "") {
-		return errors.New("--stats is not supported with --all-containers or --selector")
+	if o.stats && o.timeline {
+		return errors.New("--stats cannot be combined with --timeline")
+	}
+	if o.maxConcurrency < 1 {
+		return errors.New("--max-concurrency must be at least 1")
 	}
 	return nil
 }

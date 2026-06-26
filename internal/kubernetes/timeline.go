@@ -150,11 +150,18 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) error {
 }
 
 func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineItem, error) {
+	// --since/--tail bound the log portion of the timeline just as they bound a
+	// plain log fetch. Timestamps stay forced on (the timeline sorts by them);
+	// --tail limits the trailing log lines, while events are bounded separately by
+	// maxTimelineEvents.
 	podLogOpts := corev1.PodLogOptions{
-		Container:  lf.ContainerName,
-		Follow:     false,
-		Previous:   lf.Previous,
-		Timestamps: true,
+		Container:    lf.ContainerName,
+		Follow:       false,
+		Previous:     lf.Previous,
+		Timestamps:   true,
+		SinceSeconds: lf.SinceSeconds,
+		SinceTime:    lf.SinceTime,
+		TailLines:    lf.TailLines,
 	}
 
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)

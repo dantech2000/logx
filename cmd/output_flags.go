@@ -12,6 +12,9 @@ func addOutputFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().String(flagColor, "auto", "Colorize output: auto, always, or never")
 	cmd.PersistentFlags().Bool(flagNoColor, false, "Disable colorized output (alias for --color=never)")
 	cmd.PersistentFlags().String(flagTheme, "dark", "Color theme: dark or light")
+
+	_ = cmd.RegisterFlagCompletionFunc(flagTheme, staticFlagCompletion(themeCompletions...))
+	_ = cmd.RegisterFlagCompletionFunc(flagColor, staticFlagCompletion(colorCompletions...))
 }
 
 // applyOutputConfig resolves the color/theme flags and configures the logging
