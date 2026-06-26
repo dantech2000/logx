@@ -193,3 +193,26 @@ func TestRunParseStats(t *testing.T) {
 		}
 	}
 }
+
+func TestRunParseRejectsBadOutputFormat(t *testing.T) {
+	var buf bytes.Buffer
+	cmd := newParseCmd(strings.NewReader("INFO x\n"), &buf)
+	cmd.SetArgs([]string{"-o", "xml"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected an error for an unknown --output format")
+	}
+}
+
+func TestRunParseBinaryAndMalformedInputDoesNotError(t *testing.T) {
+	// Garbage in must not crash or error the command; it should render safely.
+	bad := "\x00\x01\x02 binary\n{\"level\":\"error\",\"msg\":\n\xff\xfe invalid utf8\n"
+	var buf bytes.Buffer
+	cmd := newParseCmd(strings.NewReader(bad), &buf)
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("parse of malformed input errored: %v", err)
+	}
+	if strings.ContainsRune(buf.String(), 0x1b) {
+		t.Fatalf("malformed input leaked a raw ESC byte: %q", buf.String())
+	}
+}
