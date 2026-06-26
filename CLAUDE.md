@@ -27,12 +27,22 @@ binaries: `logx` (standalone) and `kubectl-logx` (the plugin form).
 - `cmd/` — Cobra commands. All use `RunE` and return errors (never `os.Exit` in a
   command). Flag names are constants in `cmd/flags.go`. A swappable
   `newKubernetesClient` seam in `cmd/kube_flags.go` lets tests inject a fake.
+  Shared flag groups: `filter_flags.go` (`--grep`/`--where`/`--fields`/`--output`/
+  `--stats`, and `buildPipelineOptions`), `output_flags.go` (`--color`/`--theme`),
+  `log_query.go` (`--since`/`--tail`/`--timestamps`), and `config.go` (the optional
+  `~/.config/logx/config.yaml`; flag > config > built-in default).
 - `internal/logging/` — the parsing/formatting/filtering engine (format-agnostic;
-  no Kubernetes dependency). `parser.go` classifies a line; `LevelTracker`
-  (`continuation.go`) groups multi-line entries; `filter.go` is the reader→writer
-  pipeline.
+  no Kubernetes dependency). `parser.go` (+ `parser_formats.go` for XML/CSV/YAML)
+  classifies a line; `LevelTracker` (`continuation.go`) groups multi-line entries;
+  `pipeline.go` is the single shared parse→group→filter→render engine both
+  `logx logs` and `logx parse` drive (`filter.go`'s `FilterAndFormatLogs` is now a
+  thin wrapper over it). `predicate.go` evaluates `--where`; `format.go` + `theme.go`
+  render (`--color`/`--theme`); `output_json.go` does `--output json`; `stats.go`
+  powers `--stats`; `aliases.go` registers custom field names from config.
 - `internal/kubernetes/` — client construction and the `LogFetcher` (logs +
-  timeline). Behind `kubernetes.Interface` for testability.
+  timeline). `multistream.go` fans in `--all-containers`/`--selector`/
+  `--all-namespaces` with serialized, color-prefixed writes. Behind
+  `kubernetes.Interface` for testability.
 - `internal/format/` — output formatting (table/json/yaml/posix) via tagged DTOs.
 - `internal/terminal/` — `Sanitize`, the single chokepoint for neutralizing
   control bytes and Unicode-spoofing characters in untrusted output.
@@ -68,9 +78,18 @@ Sample log files covering the formats logx is expected to handle live in
 
 ## Behavioral notes / known limitations
 
+- **Levels span `TRACE < DEBUG < INFO < WARN < ERROR < FATAL`.** `TRACE` is below
+  the default `DEBUG`, so trace lines are opt-in (`-l TRACE`). `FATAL` comes from
+  klog `F`, textual `FATAL`/`PANIC`, and numeric `60` (bunyan/pino).
 - **Level mapping is intentional**: numeric `0` maps to INFO (zap convention, not
-  syslog), and a successful HTTP status (`2xx`/`3xx`) maps to DEBUG so high-volume
-  access logs stay out of the default INFO view. Both are pinned by tests.
+  syslog), numeric `10` maps to TRACE (bunyan/pino), and a successful HTTP status
+  (`2xx`/`3xx`) maps to DEBUG so high-volume access logs stay out of the default
+  INFO view. All are pinned by tests.
+- **Custom field names** (config `fields:`) feed JSON parsing via
+  `logging.RegisterFieldAliases`, which is additive and rebuilds the
+  formatted-field exclusion set; logfmt level/message keys remain a fixed list.
+- **`--stats` is single-stream**: it is rejected with `--all-containers`/
+  `--selector` to avoid fragmented, unsynchronized aggregation.
 - **Multi-line grouping** (stack traces): an *indented* continuation line inherits
   the level of the entry it belongs to, so a stack trace stays visible at its
   parent's `--level`. The level tracker carries the parent across intervening

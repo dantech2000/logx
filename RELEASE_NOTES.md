@@ -18,6 +18,35 @@
 
 ## Added
 
+- Extended the level spectrum to `TRACE < DEBUG < INFO < WARN < ERROR < FATAL`.
+  `TRACE` is below the default `DEBUG` (opt-in via `-l TRACE`); `FATAL` comes from
+  klog `F`, textual `FATAL`/`PANIC`, and numeric `60` (bunyan/pino). Numeric `10`
+  now maps to `TRACE`. The pinned mappings (numeric `0`→INFO, `2xx`/`3xx`→DEBUG)
+  are unchanged.
+- Content filtering shared by `logx logs` and `logx parse`: `--grep`/`--exclude`
+  regexes (repeatable; matches are reverse-video highlighted) and `--where` field
+  predicates (`==`, `!=`, `>`, `>=`, `<`, `<=`, `~=`) over structured fields and
+  virtual keys (`level`/`message`/`logger`/`ts`), with severity-aware `level>=WARN`.
+- `--fields ts,level,msg` projects output to chosen keys, and `--output json`
+  emits normalized NDJSON (terminal-safe, de-duplicated fields) for `jq`.
+- `--stats` prints a digest instead of the lines: counts by level, HTTP
+  status class, and the top recurring (templated) messages.
+- Server-side log windowing: `--since` (duration or RFC3339), `--tail`, and
+  `--timestamps`.
+- Multi-stream tailing with color-coded, non-interleaved prefixes:
+  `--all-containers` (one pod), `--selector` (label-matched pods), and
+  `--all-namespaces` (cluster-wide, with `--selector`).
+- `--color`/`--no-color` (and `NO_COLOR`/TTY detection) plus a `--theme`
+  (`dark`/`light`) for output appearance.
+- `--timeline` now adds `[TERM]` entries with container termination details —
+  exit code, signal, and reason such as `OOMKilled` — for the current and
+  previous container instances.
+- Recognize XML, CSV, and flow-style YAML single-line log bodies that previously
+  fell through to plain text, each guarded against false positives.
+- Optional config file (`$LOGX_CONFIG` / `$XDG_CONFIG_HOME/logx/config.yaml` /
+  `~/.config/logx/config.yaml`) for default level/theme/color and custom
+  level/message/timestamp field-name mappings. Precedence is flag > config >
+  built-in default.
 - Support init and ephemeral containers: `logx containers` now lists them
   (tagged `[init]`/`[ephemeral]`, and with a `kind` field in `-o json`/`-o yaml`),
   and `logx logs -c <init-or-ephemeral-container>` can fetch their logs.
