@@ -2,6 +2,7 @@ package logging
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -74,5 +75,39 @@ func TestStatusClassOf(t *testing.T) {
 		if got != c.wantClass || ok != c.wantOK {
 			t.Errorf("statusClassOf(%s) = %d,%v want %d,%v", c.line, got, ok, c.wantClass, c.wantOK)
 		}
+	}
+}
+
+// TestStatsConcurrentRecord exercises the thread-safety of a single Stats shared
+// by several goroutines (the multi-stream --stats path). Run with -race to catch
+// unsynchronized map writes. Every entry must be counted exactly once.
+func TestStatsConcurrentRecord(t *testing.T) {
+	const goroutines = 8
+	const perGoroutine = 500
+
+	s := NewStats()
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			entry := ParseLogEntry(`{"level":"error","status":503,"path":"/api","msg":"upstream down"}`)
+			for i := 0; i < perGoroutine; i++ {
+				s.Record(entry)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	if got, want := s.Total(), goroutines*perGoroutine; got != want {
+		t.Fatalf("Total() = %d, want %d (a lost update indicates a data race)", got, want)
+	}
+
+	var buf strings.Builder
+	if err := s.Write(&buf); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, "lines: 4000") {
+		t.Fatalf("aggregated digest wrong:\n%s", out)
 	}
 }

@@ -22,6 +22,13 @@ func TestParseFieldPredicate(t *testing.T) {
 		{"noop", "", opEq, "", true},
 		{"=novalue", "", opEq, "", true},
 		{"bad~=(", "", opEq, "", true}, // invalid regex
+		// A key that reads as pure operator characters is a parsing artifact (the
+		// leftmost real operator left ">" or "!" as the "name"); reject it instead
+		// of filtering on a field literally named ">".
+		{">=5", "", opEq, "", true},
+		{"<=10", "", opEq, "", true},
+		{"==5", "", opEq, "", true},
+		{"!=x", "", opEq, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expr, func(t *testing.T) {
@@ -81,6 +88,40 @@ func TestFieldPredicateEval(t *testing.T) {
 				t.Fatalf("Eval(%q) on %s = %v, want %v", tt.expr, tt.line, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsPureOperatorKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"", false},
+		{">", true},
+		{">=", true},
+		{"!", true},
+		{"~=", true},
+		{"<>=!~", true},
+		{"status", false},
+		{"@timestamp", false},  // '@' is not an operator char
+		{"http.status", false}, // '.' is not an operator char
+		{">x", false},          // contains a non-operator rune
+		{"log_level", false},
+	}
+	for _, tt := range tests {
+		if got := isPureOperatorKey(tt.key); got != tt.want {
+			t.Errorf("isPureOperatorKey(%q) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}
+
+// TestParseFieldPredicateKeepsRealFieldsWithDots guards the pure-operator guard
+// does not reject legitimate dotted/at-prefixed field names.
+func TestParseFieldPredicateKeepsRealFieldsWithDots(t *testing.T) {
+	for _, expr := range []string{"http.status_code>=500", "@timestamp~=2026", "log.level==INFO"} {
+		if _, err := ParseFieldPredicate(expr); err != nil {
+			t.Errorf("ParseFieldPredicate(%q) unexpected error: %v", expr, err)
+		}
 	}
 }
 

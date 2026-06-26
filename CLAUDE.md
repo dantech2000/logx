@@ -41,8 +41,10 @@ binaries: `logx` (standalone) and `kubectl-logx` (the plugin form).
   powers `--stats`; `aliases.go` registers custom field names from config.
 - `internal/kubernetes/` — client construction and the `LogFetcher` (logs +
   timeline). `multistream.go` fans in `--all-containers`/`--selector`/
-  `--all-namespaces` with serialized, color-prefixed writes. Behind
-  `kubernetes.Interface` for testability.
+  `--all-namespaces` through a bounded worker pool (`--max-concurrency`, default
+  10) with serialized, color-prefixed writes; `--stats` across multiple streams
+  records into one thread-safe `logging.Stats`. Behind `kubernetes.Interface` for
+  testability.
 - `internal/format/` — output formatting (table/json/yaml/posix) via tagged DTOs.
 - `internal/terminal/` — `Sanitize`, the single chokepoint for neutralizing
   control bytes and Unicode-spoofing characters in untrusted output.
@@ -85,11 +87,16 @@ Sample log files covering the formats logx is expected to handle live in
   syslog), numeric `10` maps to TRACE (bunyan/pino), and a successful HTTP status
   (`2xx`/`3xx`) maps to DEBUG so high-volume access logs stay out of the default
   INFO view. All are pinned by tests.
-- **Custom field names** (config `fields:`) feed JSON parsing via
-  `logging.RegisterFieldAliases`, which is additive and rebuilds the
-  formatted-field exclusion set; logfmt level/message keys remain a fixed list.
-- **`--stats` is single-stream**: it is rejected with `--all-containers`/
-  `--selector` to avoid fragmented, unsynchronized aggregation.
+- **Custom field names** (config `fields:`) feed both JSON and logfmt parsing via
+  `logging.RegisterFieldAliases`, which is additive (built-in names keep priority)
+  and rebuilds the formatted-field exclusion set so a custom level/timestamp key is
+  not also printed as an ordinary field. Built-in logfmt-only keys (e.g. `lvl`) and
+  the logfmt logger keys stay fixed.
+- **`--stats` aggregates across streams**: with `--all-containers`/`--selector`
+  every concurrent stream records into one shared, mutex-guarded `logging.Stats`
+  and a single digest is written after all streams finish (per-line output is
+  suppressed in stats mode, so nothing interleaves before it). `--stats` is still
+  rejected with `--timeline`.
 - **Multi-line grouping** (stack traces): an *indented* continuation line inherits
   the level of the entry it belongs to, so a stack trace stays visible at its
   parent's `--level`. The level tracker carries the parent across intervening
@@ -98,4 +105,10 @@ Sample log files covering the formats logx is expected to handle live in
   over-inclusion; a perfectly precise version needs one-line lookahead, which is
   incompatible with `--follow` streaming. See `internal/logging/continuation.go`.
 - `--timeline` shows only the target pod's own events (server-side field selector
-  plus a client-side guard) and cannot be combined with `--follow`.
+  plus a client-side guard) and cannot be combined with `--follow`. `--since`/
+  `--tail` bound the log portion of the timeline (events stay bounded separately by
+  `maxTimelineEvents`).
+- **Shell completion** for value-enum flags (`--level`/`--theme`/`--color`/
+  `--output`) and field-name hints (`--fields`/`--where`) is registered in
+  `cmd/completion.go` and wired from the flag-group helpers, so both `logs` and
+  `parse` get it.

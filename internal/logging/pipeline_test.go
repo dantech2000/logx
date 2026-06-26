@@ -154,3 +154,33 @@ func TestPipelineHighlightHonorsColor(t *testing.T) {
 		t.Fatalf("highlight missing with color on: %q", out)
 	}
 }
+
+// TestNewPipelineWithStatsSharesAccumulator verifies that several pipelines built
+// with NewPipelineWithStats record into the same Stats (the multi-stream --stats
+// path) and that each suppresses its own per-line output.
+func TestNewPipelineWithStatsSharesAccumulator(t *testing.T) {
+	shared := NewStats()
+	p1 := NewPipelineWithStats(PipelineOptions{MinLevel: DEBUG}, shared)
+	p2 := NewPipelineWithStats(PipelineOptions{MinLevel: DEBUG}, shared)
+
+	if p1.Stats() != shared || p2.Stats() != shared {
+		t.Fatal("pipelines did not adopt the shared Stats")
+	}
+
+	for _, p := range []*Pipeline{p1, p2} {
+		if out, ok := p.ProcessLine("ERROR boom"); ok {
+			t.Fatalf("stats mode should suppress per-line output, got %q", out)
+		}
+	}
+	if got := shared.Total(); got != 2 {
+		t.Fatalf("shared.Total() = %d, want 2 (one per pipeline)", got)
+	}
+
+	var buf strings.Builder
+	if err := shared.Write(&buf); err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "lines: 2") {
+		t.Fatalf("digest did not aggregate both pipelines:\n%s", buf.String())
+	}
+}

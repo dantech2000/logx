@@ -58,6 +58,17 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 	return p
 }
 
+// NewPipelineWithStats returns a Pipeline that records its digest into the
+// provided shared Stats instead of a private one. Several pipelines (one per
+// concurrent stream in --all-containers/--selector mode) can share a single
+// thread-safe Stats so --stats aggregates across every stream. CollectStats is
+// implied, so per-line output is suppressed exactly as in single-stream stats
+// mode.
+func NewPipelineWithStats(opts PipelineOptions, stats *Stats) *Pipeline {
+	opts.CollectStats = true
+	return &Pipeline{opts: opts, stats: stats}
+}
+
 // Stats returns the accumulated digest, or nil if CollectStats was not set.
 func (p *Pipeline) Stats() *Stats { return p.stats }
 

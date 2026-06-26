@@ -74,6 +74,15 @@ var (
 		"datetime",   // Python logging
 	}
 
+	// logfmt key names recognized for the level, message, logger, and timestamp of
+	// a logfmt line. They are kept as package vars (not inline literals) so config
+	// `fields:` aliases registered via RegisterFieldAliases extend logfmt parsing
+	// too, not just JSON. The logger list is not user-configurable.
+	logfmtLevelFields   = []string{"level", "severity", "log_level", "lvl"}
+	logfmtMessageFields = []string{"msg", "message", "log"}
+	logfmtLoggerFields  = []string{"component", "logger", "logger_name", "source"}
+	logfmtTimeFields    = []string{"time", "timestamp", "ts", "@timestamp"}
+
 	// Time formats to try parsing
 	timeFormats = []string{
 		time.RFC3339,
@@ -205,21 +214,21 @@ func (logfmtLogParser) Parse(line string) (LogEntry, bool) {
 		Fields:  fields,
 		RawLine: line,
 	}
-	if levelValue, ok := firstStringField(fields, "level", "severity", "log_level", "lvl"); ok {
+	if levelValue, ok := firstStringField(fields, logfmtLevelFields...); ok {
 		if level, err := ParseLogLevel(levelValue); err == nil {
 			entry.Level = level
 			entry.LevelDetected = true
 		}
 	}
-	if message, ok := firstStringField(fields, "msg", "message", "log"); ok {
+	if message, ok := firstStringField(fields, logfmtMessageFields...); ok {
 		entry.Message = message
 	} else {
 		entry.Message = line
 	}
-	if logger, ok := firstStringField(fields, "component", "logger", "logger_name", "source"); ok {
+	if logger, ok := firstStringField(fields, logfmtLoggerFields...); ok {
 		entry.Logger = logger
 	}
-	if timeValue, ok := firstStringField(fields, "time", "timestamp", "ts", "@timestamp"); ok {
+	if timeValue, ok := firstStringField(fields, logfmtTimeFields...); ok {
 		if ts, err := parseTimestamp(timeValue); err == nil {
 			entry.Timestamp = ts
 		}
