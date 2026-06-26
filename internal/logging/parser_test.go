@@ -468,7 +468,7 @@ func TestParseLogEntryKlog(t *testing.T) {
 		{"info", "I0624 10:00:00.111111   1 main.go:10] starting controller", INFO, "starting controller"},
 		{"warning", "W0624 10:00:01.222222  12 sync.go:88] retrying sync", WARN, "retrying sync"},
 		{"error", "E0624 10:00:02.333333  12 server.go:42] failed to sync", ERROR, "failed to sync"},
-		{"fatal maps to error", "F0624 10:00:03.444444   1 boot.go:5] cannot start", ERROR, "cannot start"},
+		{"fatal", "F0624 10:00:03.444444   1 boot.go:5] cannot start", FATAL, "cannot start"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -604,11 +604,17 @@ func TestParseLogLevel(t *testing.T) {
 		{"zap numeric info level", "0", INFO, false},
 		{"zap numeric warn level", "1", WARN, false},
 		{"zap numeric error level", "2", ERROR, false},
-		{"pino numeric trace level", "10", DEBUG, false},
+		{"pino numeric trace level", "10", TRACE, false},
 		{"pino numeric debug level", "20", DEBUG, false},
 		{"pino numeric info level", "30", INFO, false},
 		{"pino numeric warn level", "40", WARN, false},
 		{"pino numeric error level", "50", ERROR, false},
+		{"pino numeric fatal level", "60", FATAL, false},
+		{"textual trace", "trace", TRACE, false},
+		{"textual verbose maps to trace", "VERBOSE", TRACE, false},
+		{"textual fatal", "FATAL", FATAL, false},
+		{"textual panic maps to fatal", "panic", FATAL, false},
+		{"textual critical stays error", "CRITICAL", ERROR, false},
 		{"invalid level", "INVALID", DEBUG, true},
 	}
 

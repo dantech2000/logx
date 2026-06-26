@@ -343,6 +343,11 @@ func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	fetcher := NewLogFetcher(clientset, "default", "test-pod", true, true, &buf)
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.ERROR
+	fetcher.Timestamps = true
+	tail := int64(25)
+	fetcher.TailLines = &tail
+	since := int64(600)
+	fetcher.SinceSeconds = &since
 
 	if err := fetcher.GetLogs(context.Background()); err != nil {
 		t.Fatalf("GetLogs() error = %v", err)
@@ -358,6 +363,15 @@ func TestLogFetcher_GetLogsPassesPodLogOptions(t *testing.T) {
 	}
 	if !gotOptions.Previous {
 		t.Fatal("Previous = false, want true")
+	}
+	if !gotOptions.Timestamps {
+		t.Fatal("Timestamps = false, want true")
+	}
+	if gotOptions.TailLines == nil || *gotOptions.TailLines != 25 {
+		t.Fatalf("TailLines = %v, want 25", gotOptions.TailLines)
+	}
+	if gotOptions.SinceSeconds == nil || *gotOptions.SinceSeconds != 600 {
+		t.Fatalf("SinceSeconds = %v, want 600", gotOptions.SinceSeconds)
 	}
 }
 
@@ -1065,8 +1079,7 @@ func TestLogWriter_Write(t *testing.T) {
 
 func TestLogWriter_WriteFiltersByLevel(t *testing.T) {
 	var buf bytes.Buffer
-	writer := NewLogWriter(&buf)
-	writer.filterLevel = logging.WARN
+	writer := NewLogWriterWithPipeline(&buf, logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.WARN}))
 
 	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z INFO hidden")); err != nil {
 		t.Fatalf("Write() info error = %v", err)
@@ -1082,4 +1095,51 @@ func TestLogWriter_WriteFiltersByLevel(t *testing.T) {
 	if !strings.Contains(got, "shown") {
 		t.Fatalf("Write() missing expected log: %q", got)
 	}
+}
+
+func TestLogFetcher_GetTimelineShowsTerminationDetails(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte("2026-05-15T00:38:02Z INFO application started")}, nil
+	})
+
+	finished := metav1.Date(2026, 5, 15, 0, 38, 10, 0, time.UTC)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "app-image"}}},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "app",
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode:   137,
+							Reason:     "OOMKilled",
+							FinishedAt: finished,
+						},
+					},
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				},
+			},
+		},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.INFO
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
+		t.Fatalf("GetTimeline() error = %v", err)
+	}
+
+	got := buf.String()
+	want := `[2026-05-15 00:38:10] [TERM] (previous) container "app" exited with code 137 — OOMKilled`
+	if !strings.Contains(got, want) {
+		t.Fatalf("timeline missing termination detail.\nwant substring: %s\ngot:\n%s", want, got)
+	}
+	// The termination (00:38:10) sorts after the earlier log line (00:38:02).
+	assertInOrder(t, got, []string{"application started", "OOMKilled"})
 }

@@ -22,6 +22,9 @@ type LogFetcher struct {
 	Clientset kubernetes.Interface
 	// Namespace is the Kubernetes namespace
 	Namespace string
+	// AllNamespaces, when set, makes selector-based fetching search every
+	// namespace instead of just Namespace.
+	AllNamespaces bool
 	// PodName is the name of the pod
 	PodName string
 	// ContainerName is the name of the container (optional, will prompt if not provided)
@@ -32,6 +35,18 @@ type LogFetcher struct {
 	Previous bool
 	// FilterLevel is the minimum level that will be written
 	FilterLevel logging.LogLevel
+	// Filters carries the content filters (grep/exclude/highlight, field
+	// predicates, projection) applied to streamed logs. Its MinLevel is set from
+	// FilterLevel when the pipeline is built.
+	Filters logging.PipelineOptions
+	// Timestamps requests kubelet RFC3339 timestamps on each line (the pipeline
+	// recognizes and renders them).
+	Timestamps bool
+	// SinceSeconds and SinceTime bound how far back to read (only one is set);
+	// TailLines caps the number of trailing lines. Nil means unbounded.
+	SinceSeconds *int64
+	SinceTime    *metav1.Time
+	TailLines    *int64
 	// Writer is where the logs will be written
 	Writer io.Writer
 }
@@ -123,42 +138,37 @@ func (lf *LogFetcher) hasPreviousContainer(ctx context.Context, containerName st
 	return false, fmt.Errorf("container '%s' not found in pod '%s'", containerName, lf.PodName)
 }
 
-// LogWriter wraps an io.Writer to process logs before writing
+// LogWriter is an io.Writer that feeds each written line through a shared
+// logging.Pipeline and writes the rendered result. It expects exactly one log
+// line per Write call (with no embedded newline), which is how GetLogs drives it
+// from the line reader; this per-line contract is also what lets later features
+// (multi-container / multi-pod) wrap one LogWriter per stream and merge them.
 type LogWriter struct {
-	writer      io.Writer
-	filterLevel logging.LogLevel
-	tracker     logging.LevelTracker
+	writer   io.Writer
+	pipeline *logging.Pipeline
 }
 
-// Write implements io.Writer. It expects exactly one log line per call (with no
-// embedded newline), which is how GetLogs drives it from the line reader. It is
-// not a general-purpose io.Writer: continuation-line detection and the
-// trim-then-parse step rely on p being a single line.
+// Write implements io.Writer. p must be a single log line.
 func (w *LogWriter) Write(p []byte) (n int, err error) {
-	// Keep the untrimmed line so indentation (which marks continuation lines) is
-	// preserved, then trim for parsing.
-	rawLine := string(p)
-	logLine := strings.TrimSpace(rawLine)
-	if logLine == "" {
+	out, ok := w.pipeline.ProcessLine(string(p))
+	if !ok {
 		return len(p), nil
 	}
-
-	entry := logging.ParseLogEntry(logLine)
-	// Continuation lines (e.g. indented stack-trace frames) inherit the level of
-	// the entry they belong to so they are filtered and shown together with it.
-	entry.Level = w.tracker.Effective(entry, rawLine)
-	if entry.Level < w.filterLevel {
-		return len(p), nil
+	if _, err := fmt.Fprintln(w.writer, out); err != nil {
+		return len(p), err
 	}
-	parsedLog := logging.FormatLogEntry(entry)
-	// Write the parsed log with a newline
-	_, err = fmt.Fprintln(w.writer, parsedLog)
-	return len(p), err
+	return len(p), nil
 }
 
-// NewLogWriter creates a new LogWriter
+// NewLogWriter creates a LogWriter that emits every entry at or above DEBUG.
 func NewLogWriter(w io.Writer) *LogWriter {
-	return &LogWriter{writer: w, filterLevel: logging.DEBUG}
+	return NewLogWriterWithPipeline(w, logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.DEBUG}))
+}
+
+// NewLogWriterWithPipeline creates a LogWriter backed by a caller-configured
+// Pipeline, so the filter level (and later, richer filters) is set in one place.
+func NewLogWriterWithPipeline(w io.Writer, pipeline *logging.Pipeline) *LogWriter {
+	return &LogWriter{writer: w, pipeline: pipeline}
 }
 
 // GetLogs retrieves logs from the specified container.
@@ -169,13 +179,7 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 		return err
 	}
 
-	// Now proceed with log fetching
-	podLogOpts := corev1.PodLogOptions{
-		Container: lf.ContainerName,
-		Follow:    lf.Follow,
-		Previous:  lf.Previous,
-	}
-
+	podLogOpts := lf.podLogOptions(lf.ContainerName)
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
 	podLogs, err := req.Stream(ctx)
 	if err != nil {
@@ -183,15 +187,12 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 	defer func() { _ = podLogs.Close() }()
 
-	// Create a scanner to read logs line by line
+	// Drive the shared pipeline over the stream, one line at a time.
+	pipeline := lf.newPipeline()
+	logWriter := NewLogWriterWithPipeline(lf.Writer, pipeline)
 	scanner := logging.NewLineReader(podLogs)
-	logWriter := NewLogWriter(lf.Writer)
-	logWriter.filterLevel = lf.FilterLevel
-
-	// Process each log line
 	for scanner.Scan() {
-		logLine := scanner.Text()
-		if _, err := logWriter.Write([]byte(logLine)); err != nil {
+		if _, err := logWriter.Write([]byte(scanner.Text())); err != nil {
 			return fmt.Errorf("error writing log line: %w", err)
 		}
 	}
@@ -200,5 +201,32 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 		return fmt.Errorf("error reading log stream: %w", err)
 	}
 
+	if stats := pipeline.Stats(); stats != nil {
+		return stats.Write(lf.Writer)
+	}
+
 	return nil
+}
+
+// podLogOptions builds the PodLogOptions for a container from the fetcher's
+// settings. Shared by single- and multi-stream paths so the log window is
+// defined in one place.
+func (lf *LogFetcher) podLogOptions(container string) corev1.PodLogOptions {
+	return corev1.PodLogOptions{
+		Container:    container,
+		Follow:       lf.Follow,
+		Previous:     lf.Previous,
+		Timestamps:   lf.Timestamps,
+		SinceSeconds: lf.SinceSeconds,
+		SinceTime:    lf.SinceTime,
+		TailLines:    lf.TailLines,
+	}
+}
+
+// newPipeline builds the shared logging pipeline from the fetcher's filters,
+// with the level taken authoritatively from FilterLevel.
+func (lf *LogFetcher) newPipeline() *logging.Pipeline {
+	opts := lf.Filters
+	opts.MinLevel = lf.FilterLevel
+	return logging.NewPipeline(opts)
 }

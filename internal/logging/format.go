@@ -3,6 +3,7 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -10,21 +11,77 @@ import (
 	"github.com/fatih/color"
 )
 
-var logLevelColors = map[LogLevel]*color.Color{
-	DEBUG: color.New(color.FgCyan),
-	INFO:  color.New(color.FgGreen),
-	WARN:  color.New(color.FgYellow),
-	ERROR: color.New(color.FgRed),
+const (
+	// Reverse-video on/off. Unlike a foreground/background color it composes with
+	// the colors already in the rendered line: it only toggles the reverse
+	// attribute, so surrounding theme colors are preserved across the match.
+	highlightOn  = "\x1b[7m"
+	highlightOff = "\x1b[27m"
+)
+
+// highlightMatches wraps every non-overlapping match of any pattern in s with
+// reverse-video so grep matches stand out. Overlapping match ranges from
+// different patterns are merged. It is a no-op when color is disabled, so plain
+// output stays free of escape codes.
+func highlightMatches(s string, patterns []*regexp.Regexp) string {
+	if color.NoColor || len(patterns) == 0 || s == "" {
+		return s
+	}
+
+	type span struct{ start, end int }
+	var spans []span
+	for _, re := range patterns {
+		for _, m := range re.FindAllStringIndex(s, -1) {
+			if m[1] > m[0] { // ignore zero-width matches
+				spans = append(spans, span{m[0], m[1]})
+			}
+		}
+	}
+	if len(spans) == 0 {
+		return s
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+
+	var b strings.Builder
+	cursor := 0
+	cur := spans[0]
+	flush := func(sp span) {
+		if sp.start < cursor {
+			sp.start = cursor
+		}
+		if sp.start >= sp.end {
+			return
+		}
+		b.WriteString(s[cursor:sp.start])
+		b.WriteString(highlightOn)
+		b.WriteString(s[sp.start:sp.end])
+		b.WriteString(highlightOff)
+		cursor = sp.end
+	}
+	for _, sp := range spans[1:] {
+		if sp.start <= cur.end { // overlapping/adjacent: merge
+			if sp.end > cur.end {
+				cur.end = sp.end
+			}
+			continue
+		}
+		flush(cur)
+		cur = sp
+	}
+	flush(cur)
+	b.WriteString(s[cursor:])
+	return b.String()
 }
 
-var (
-	timestampColor = color.New(color.FgBlue)
-	loggerColor    = color.New(color.FgMagenta)
-	keyColor       = color.New(color.FgCyan)
-	valueColor     = color.New(color.FgWhite)
-	quoteColor     = color.New(color.FgHiBlack)
-	errorColor     = color.New(color.FgRed, color.Bold)
-)
+// Color accessors read from the active theme (see theme.go) so a --theme switch
+// re-colors all output through one place.
+func levelColorFor(level LogLevel) *color.Color { return activeTheme.levelColor(level) }
+func timestampColor() *color.Color              { return activeTheme.timestamp }
+func loggerColor() *color.Color                 { return activeTheme.logger }
+func keyColor() *color.Color                    { return activeTheme.key }
+func valueColor() *color.Color                  { return activeTheme.value }
+func quoteColor() *color.Color                  { return activeTheme.quote }
+func errorColor() *color.Color                  { return activeTheme.errorText }
 
 var jsonFormattedFieldExclusions = buildStringSet(jsonLevelFields, jsonTimeFields)
 
@@ -37,13 +94,13 @@ func FormatLogEntry(entry LogEntry) string {
 		// Normalize to UTC so timestamps are consistent regardless of the source
 		// format (RFC3339 parses to UTC, but epoch values parse to local time);
 		// this also matches the --timeline output.
-		parts = append(parts, timestampColor.Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
+		parts = append(parts, timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
 	}
 
 	parts = append(parts, FormatLogLevelLabel(entry.Level))
 
 	if entry.Format == FormatJSON && entry.Logger != "" {
-		parts = append(parts, loggerColor.Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
+		parts = append(parts, loggerColor().Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
 	}
 
 	parts = append(parts, FormatLogEntryDetails(entry))
@@ -52,11 +109,78 @@ func FormatLogEntry(entry LogEntry) string {
 
 // FormatLogLevelLabel returns the colorized bracketed label for a log level.
 func FormatLogLevelLabel(level LogLevel) string {
-	levelColor, ok := logLevelColors[level]
-	if !ok {
-		levelColor = logLevelColors[DEBUG]
+	return levelColorFor(level).Sprint(fmt.Sprintf("[%s]", level))
+}
+
+// prefixPalette colors stream labels (container/pod names) in merged output. The
+// colors are picked to stay distinct from the level colors.
+var prefixPalette = []*color.Color{
+	color.New(color.FgHiCyan),
+	color.New(color.FgHiGreen),
+	color.New(color.FgHiYellow),
+	color.New(color.FgHiMagenta),
+	color.New(color.FgHiBlue),
+	color.New(color.FgHiRed),
+}
+
+// ColorizePrefix renders a stream label (e.g. a container or pod name) in a
+// stable palette color chosen by idx, so each stream keeps a consistent color
+// when several are merged. The label is sanitized; color obeys the global switch.
+func ColorizePrefix(label string, idx int) string {
+	if idx < 0 {
+		idx = 0
 	}
-	return levelColor.Sprint(fmt.Sprintf("[%s]", level))
+	return prefixPalette[idx%len(prefixPalette)].Sprint(terminal.Sanitize(label))
+}
+
+// FormatProjectedEntry renders only the requested keys of an entry as
+// `key=value` pairs in the given order (the --fields projection). Virtual keys
+// (level, message, logger, timestamp) are supported alongside structured fields;
+// a missing key is omitted so output stays composable.
+func FormatProjectedEntry(entry LogEntry, fields []string) string {
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		val, ok := projectFieldValue(entry, f)
+		if !ok {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f)), val))
+	}
+	return strings.Join(parts, " ")
+}
+
+// projectFieldValue returns the formatted value for a projection key, or false
+// when the entry has nothing for it.
+func projectFieldValue(entry LogEntry, key string) (string, bool) {
+	switch {
+	case keyIn(key, levelKeys):
+		return levelColorFor(entry.Level).Sprint(entry.Level.String()), true
+	case keyIn(key, messageKeys):
+		msg := entry.Message
+		if msg == "" {
+			msg = entry.RawLine
+		}
+		if msg == "" {
+			return "", false
+		}
+		return formatStringValue(msg), true
+	case keyIn(key, loggerKeys):
+		if entry.Logger == "" {
+			return "", false
+		}
+		return valueColor().Sprint(terminal.Sanitize(entry.Logger)), true
+	case keyIn(key, tsKeys):
+		if entry.Timestamp.IsZero() {
+			return "", false
+		}
+		return timestampColor().Sprint(entry.Timestamp.UTC().Format("2006-01-02 15:04:05")), true
+	}
+	if entry.Fields != nil {
+		if v, ok := fieldValue(entry.Fields, key); ok {
+			return formatValue(v), true
+		}
+	}
+	return "", false
 }
 
 // FormatLogEntryDetails renders the message and structured fields of an entry,
@@ -111,7 +235,7 @@ func formatPlainTextDetails(entry LogEntry) string {
 	}
 	sanitized := terminal.Sanitize(message)
 	if entry.Level == ERROR || containsAttentionText(message) {
-		return errorColor.Sprint(sanitized)
+		return errorColor().Sprint(sanitized)
 	}
 	return sanitized
 }
@@ -127,7 +251,7 @@ func jsonMessage(entry LogEntry) string {
 
 func formatMessage(entry LogEntry, msg string) string {
 	if entry.Level == ERROR || containsAttentionText(msg) {
-		return errorColor.Sprint(msg)
+		return errorColor().Sprint(msg)
 	}
 	return msg
 }
@@ -146,7 +270,7 @@ func formatSortedFields(fields map[string]interface{}) []string {
 			continue
 		}
 		formattedFields = append(formattedFields, fmt.Sprintf("%s=%s",
-			keyColor.Sprint(terminal.Sanitize(key)),
+			keyColor().Sprint(terminal.Sanitize(key)),
 			formatValue(fields[key])))
 	}
 	return formattedFields
@@ -175,28 +299,28 @@ func formatValue(v interface{}) string {
 	case string:
 		return formatStringValue(val)
 	case nil:
-		return quoteColor.Sprint("null")
+		return quoteColor().Sprint("null")
 	case bool:
 		if val {
-			return valueColor.Sprint("true")
+			return valueColor().Sprint("true")
 		}
-		return valueColor.Sprint("false")
+		return valueColor().Sprint("false")
 	case float64:
 		if float64(int64(val)) == val {
-			return valueColor.Sprintf("%d", int64(val))
+			return valueColor().Sprintf("%d", int64(val))
 		}
-		return valueColor.Sprintf("%.2f", val)
+		return valueColor().Sprintf("%.2f", val)
 	case float32:
 		return formatValue(float64(val))
 	case json.Number:
 		return formatJSONNumber(val)
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return valueColor.Sprintf("%d", val)
+		return valueColor().Sprintf("%d", val)
 	case map[string]interface{}:
 		parts := make([]string, 0, len(val))
 		for _, key := range sortedKeys(val) {
 			parts = append(parts, fmt.Sprintf("%s=%s",
-				keyColor.Sprint(terminal.Sanitize(key)),
+				keyColor().Sprint(terminal.Sanitize(key)),
 				formatValue(val[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, " "))
@@ -207,7 +331,7 @@ func formatValue(v interface{}) string {
 		}
 		return fmt.Sprintf("[%s]", strings.Join(parts, " "))
 	default:
-		return valueColor.Sprint(terminal.Sanitize(fmt.Sprintf("%v", val)))
+		return valueColor().Sprint(terminal.Sanitize(fmt.Sprintf("%v", val)))
 	}
 }
 
@@ -216,15 +340,15 @@ func formatValue(v interface{}) string {
 func formatStringValue(val string) string {
 	val = terminal.Sanitize(val)
 	if val == "" {
-		return quoteColor.Sprint(`""`)
+		return quoteColor().Sprint(`""`)
 	}
 	if strings.ContainsAny(val, " =,\"'[]{}()") {
 		return fmt.Sprintf("%s%s%s",
-			quoteColor.Sprint(`"`),
-			valueColor.Sprint(val),
-			quoteColor.Sprint(`"`))
+			quoteColor().Sprint(`"`),
+			valueColor().Sprint(val),
+			quoteColor().Sprint(`"`))
 	}
-	return valueColor.Sprint(val)
+	return valueColor().Sprint(val)
 }
 
 // formatJSONNumber renders a json.Number. Integer literals are printed verbatim
@@ -234,10 +358,10 @@ func formatJSONNumber(val json.Number) string {
 	s := val.String()
 	if !strings.ContainsAny(s, ".eE") {
 		// Pure integer literal: preserve exactly (handles values larger than int64).
-		return valueColor.Sprint(terminal.Sanitize(s))
+		return valueColor().Sprint(terminal.Sanitize(s))
 	}
 	if parsedValue, err := val.Float64(); err == nil {
-		return valueColor.Sprintf("%.2f", parsedValue)
+		return valueColor().Sprintf("%.2f", parsedValue)
 	}
-	return valueColor.Sprint(terminal.Sanitize(s))
+	return valueColor().Sprint(terminal.Sanitize(s))
 }

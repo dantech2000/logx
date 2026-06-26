@@ -69,6 +69,14 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	}
 	items = append(items, eventItems...)
 
+	// Container termination details (exit code, OOMKilled, signal) explain why a
+	// container died — something the events don't spell out. Best-effort: the pod
+	// was already validated in prepareLogRequest, so skip silently on a refetch
+	// hiccup rather than failing the whole timeline.
+	if termItems, terr := lf.collectTerminationItems(ctx, len(items)); terr == nil {
+		items = append(items, termItems...)
+	}
+
 	// Logs failed but events are available: degrade gracefully (events often
 	// explain why logs are missing, e.g. ImagePullBackOff) while still telling
 	// the user that the log stream could not be read.
@@ -212,6 +220,84 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 	// A non-empty Continue token means more events matched than the limit returned.
 	truncated := events.Continue != ""
 	return items, truncated, nil
+}
+
+// collectTerminationItems emits a timeline item for each terminated state of the
+// target container — the current termination (if the container has exited) and
+// the previous instance's termination (from LastTerminationState) — carrying the
+// exit code, reason (e.g. OOMKilled), and signal.
+func (lf *LogFetcher) collectTerminationItems(ctx context.Context, orderOffset int) ([]timelineItem, error) {
+	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("error fetching pod details: %w", err)
+	}
+
+	var items []timelineItem
+	for _, cs := range allContainerStatuses(pod) {
+		if cs.Name != lf.ContainerName {
+			continue
+		}
+		if t := cs.LastTerminationState.Terminated; t != nil {
+			items = append(items, terminationTimelineItem(*t, cs.Name, true, orderOffset+len(items)))
+		}
+		if t := cs.State.Terminated; t != nil {
+			items = append(items, terminationTimelineItem(*t, cs.Name, false, orderOffset+len(items)))
+		}
+	}
+	return items, nil
+}
+
+// allContainerStatuses returns the statuses of regular, init, and ephemeral
+// containers in a single slice.
+func allContainerStatuses(pod *corev1.Pod) []corev1.ContainerStatus {
+	statuses := make([]corev1.ContainerStatus, 0,
+		len(pod.Status.ContainerStatuses)+len(pod.Status.InitContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
+	statuses = append(statuses, pod.Status.ContainerStatuses...)
+	statuses = append(statuses, pod.Status.InitContainerStatuses...)
+	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
+	return statuses
+}
+
+func terminationTimelineItem(term corev1.ContainerStateTerminated, container string, previous bool, order int) timelineItem {
+	return timelineItem{
+		timestamp: term.FinishedAt.Time,
+		order:     order,
+		line:      formatTermination(term, container, previous),
+	}
+}
+
+// formatTermination renders a [TERM] timeline line. A non-zero exit code or an
+// OOMKilled reason is highlighted, since those are the failures users hunt for.
+func formatTermination(term corev1.ContainerStateTerminated, container string, previous bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "container %q exited with code %d", container, term.ExitCode)
+	if term.Signal != 0 {
+		fmt.Fprintf(&b, " (signal %d)", term.Signal)
+	}
+	if term.Reason != "" {
+		fmt.Fprintf(&b, " — %s", term.Reason)
+	}
+	if msg := strings.TrimSpace(term.Message); msg != "" {
+		fmt.Fprintf(&b, ": %s", msg)
+	}
+
+	bad := term.ExitCode != 0 || strings.EqualFold(term.Reason, "OOMKilled")
+	phase := ""
+	if previous {
+		phase = " (previous)"
+	}
+	return fmt.Sprintf("%s [%s]%s %s",
+		formatTimelineTimestamp(term.FinishedAt.Time),
+		terminationColor(bad).Sprint("TERM"),
+		phase,
+		terminal.Sanitize(b.String()))
+}
+
+func terminationColor(bad bool) *color.Color {
+	if bad {
+		return color.New(color.FgRed, color.Bold)
+	}
+	return color.New(color.FgHiBlack)
 }
 
 func newTimelineEvent(event corev1.Event) timelineEvent {

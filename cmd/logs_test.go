@@ -112,3 +112,38 @@ func TestGetLogOptionsRejectsInvalidLevel(t *testing.T) {
 		t.Fatal("ParseLogLevel() error = nil, want error")
 	}
 }
+
+func TestValidateLogOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    logOptions
+		wantErr bool
+	}{
+		{"plain", logOptions{podName: "p"}, false},
+		{"all-containers alone", logOptions{podName: "p", allContainers: true}, false},
+		{"selector alone", logOptions{selector: "app=api"}, false},
+		{"neither pod nor selector", logOptions{}, true},
+		{"timeline+follow", logOptions{podName: "p", timeline: true, follow: true}, true},
+		{"all-containers+container", logOptions{podName: "p", allContainers: true, container: "app"}, true},
+		{"all-containers+timeline", logOptions{podName: "p", allContainers: true, timeline: true}, true},
+		{"selector+timeline", logOptions{selector: "app=api", timeline: true}, true},
+		{"selector+podname", logOptions{selector: "app=api", podName: "p"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLogOptions(&tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateLogOptions(%+v) error = %v, wantErr %v", tt.opts, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateLogOptionsAllNamespaces(t *testing.T) {
+	if err := validateLogOptions(&logOptions{allNamespaces: true}); err == nil {
+		t.Fatal("--all-namespaces without --selector should error")
+	}
+	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api"}); err != nil {
+		t.Fatalf("--all-namespaces with --selector should be valid, got %v", err)
+	}
+}

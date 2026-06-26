@@ -27,9 +27,24 @@ Use "logx [command] --help" for more information about a command.`,
 	// them or the usage text on a runtime (non-usage) error.
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	// Load config and configure colorized rendering once, before any command
+	// writes output.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		loadedConfig = cfg
+		cfg.applyFieldAliases()
+		return applyOutputConfig(cmd)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return cmd.Help()
+			// With no pod name, only proceed if a label selector was given;
+			// otherwise show help.
+			if selector, _ := cmd.Flags().GetString(flagSelector); selector == "" {
+				return cmd.Help()
+			}
 		}
 		return runLogs(cmd, args)
 	},
@@ -56,6 +71,7 @@ func Execute() error {
 func init() {
 	addKubeFlags(rootCmd)
 	addLogFlags(rootCmd)
+	addOutputFlags(rootCmd)
 	rootCmd.ValidArgsFunction = completePodNames
 	_ = rootCmd.RegisterFlagCompletionFunc(flagContainer, completeContainerNames)
 }

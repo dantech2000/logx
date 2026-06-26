@@ -30,17 +30,23 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(parseCmd)
-	parseCmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
+	parseCmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
+	addFilterFlags(parseCmd)
 }
 
 func runParse(cmd *cobra.Command, args []string) error {
-	levelStr, err := cmd.Flags().GetString(flagLevel)
+	levelStr, err := effectiveLevel(cmd)
 	if err != nil {
-		return fmt.Errorf("error getting level flag: %w", err)
+		return err
 	}
 	level, err := logging.ParseLogLevel(levelStr)
 	if err != nil {
 		return fmt.Errorf("invalid level %q: %w", levelStr, err)
+	}
+
+	opts, err := buildPipelineOptions(cmd, level)
+	if err != nil {
+		return err
 	}
 
 	reader, closeFn, err := openLogSource(cmd, args)
@@ -49,7 +55,14 @@ func runParse(cmd *cobra.Command, args []string) error {
 	}
 	defer closeFn()
 
-	return logging.FilterAndFormatLogs(reader, cmd.OutOrStdout(), level)
+	pipeline := logging.NewPipeline(opts)
+	if err := pipeline.Run(reader, cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	if stats := pipeline.Stats(); stats != nil {
+		return stats.Write(cmd.OutOrStdout())
+	}
+	return nil
 }
 
 // openLogSource returns the log input: the named file, or stdin when no file (or
