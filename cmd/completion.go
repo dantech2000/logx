@@ -68,18 +68,31 @@ var (
 	}
 )
 
+// filterPrefixBy returns the name of each item whose name(item) starts with
+// prefix, in the same order as items. The one prefix-filter loop shared by every
+// completion function below, whether the candidates are plain strings (values
+// themselves are the name) or richer types like corev1.Pod (named by a field).
+func filterPrefixBy[T any](items []T, prefix string, name func(T) string) []string {
+	var out []string
+	for _, item := range items {
+		if n := name(item); strings.HasPrefix(n, prefix) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// filterPrefix is filterPrefixBy for a plain string slice.
+func filterPrefix(values []string, prefix string) []string {
+	return filterPrefixBy(values, prefix, func(v string) string { return v })
+}
+
 // staticFlagCompletion returns a completion function that offers the given fixed
 // values, filtered by the prefix the user has typed. File completion is disabled
 // since these flags take an enum, not a path.
 func staticFlagCompletion(values ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		var out []string
-		for _, v := range values {
-			if strings.HasPrefix(v, toComplete) {
-				out = append(out, v)
-			}
-		}
-		return out, cobra.ShellCompDirectiveNoFileComp
+		return filterPrefix(values, toComplete), cobra.ShellCompDirectiveNoFileComp
 	}
 }
 
@@ -87,11 +100,10 @@ func staticFlagCompletion(values ...string) func(*cobra.Command, []string, strin
 // name hints for the final element while preserving any already-typed prefix.
 func completeFieldList(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	prefix, last := splitLastComma(toComplete)
-	var out []string
-	for _, name := range knownFieldNames {
-		if strings.HasPrefix(name, last) {
-			out = append(out, prefix+name)
-		}
+	matches := filterPrefix(knownFieldNames, last)
+	out := make([]string, len(matches))
+	for i, m := range matches {
+		out[i] = prefix + m
 	}
 	// NoSpace lets the user keep typing (another comma-separated field); NoFileComp
 	// suppresses path completion.
@@ -105,14 +117,8 @@ func completeWhereField(_ *cobra.Command, _ []string, toComplete string) ([]stri
 	if strings.ContainsAny(toComplete, operatorChars) {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	var out []string
-	for _, name := range knownFieldNames {
-		if strings.HasPrefix(name, toComplete) {
-			out = append(out, name)
-		}
-	}
 	// NoSpace so the user can append the operator (e.g. status>=500) without a gap.
-	return out, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
+	return filterPrefix(knownFieldNames, toComplete), cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
 }
 
 // operatorChars mirrors the predicate operator characters; once any appears in a

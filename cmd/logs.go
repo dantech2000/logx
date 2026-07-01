@@ -3,11 +3,11 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/dantech2000/logx/internal/kubernetes"
 	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -77,13 +77,7 @@ func completePodNames(cmd *cobra.Command, args []string, toComplete string) ([]s
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	var names []string
-	for _, pod := range pods.Items {
-		if strings.HasPrefix(pod.Name, toComplete) {
-			names = append(names, pod.Name)
-		}
-	}
-
+	names := filterPrefixBy(pods.Items, toComplete, func(p corev1.Pod) string { return p.Name })
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
@@ -104,50 +98,44 @@ func completeContainerNames(cmd *cobra.Command, args []string, toComplete string
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	var names []string
-	for _, container := range pod.Spec.Containers {
-		if strings.HasPrefix(container.Name, toComplete) {
-			names = append(names, container.Name)
-		}
-	}
-
+	names := filterPrefixBy(pod.Spec.Containers, toComplete, func(c corev1.Container) string { return c.Name })
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
 func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
-	container, err := cmd.Flags().GetString(flagContainer)
+	container, err := getStringFlag(cmd, flagContainer)
 	if err != nil {
-		return nil, fmt.Errorf("error getting container flag: %w", err)
+		return nil, err
 	}
 
-	allContainers, err := cmd.Flags().GetBool(flagAllContainers)
+	allContainers, err := getBoolFlag(cmd, flagAllContainers)
 	if err != nil {
-		return nil, fmt.Errorf("error getting all-containers flag: %w", err)
+		return nil, err
 	}
 
-	selector, err := cmd.Flags().GetString(flagSelector)
+	selector, err := getStringFlag(cmd, flagSelector)
 	if err != nil {
-		return nil, fmt.Errorf("error getting selector flag: %w", err)
+		return nil, err
 	}
 
-	allNamespaces, err := cmd.Flags().GetBool(flagAllNamespaces)
+	allNamespaces, err := getBoolFlag(cmd, flagAllNamespaces)
 	if err != nil {
-		return nil, fmt.Errorf("error getting all-namespaces flag: %w", err)
+		return nil, err
 	}
 
-	stats, err := cmd.Flags().GetBool(flagStats)
+	stats, err := getBoolFlag(cmd, flagStats)
 	if err != nil {
-		return nil, fmt.Errorf("error getting stats flag: %w", err)
+		return nil, err
 	}
 
-	maxConcurrency, err := cmd.Flags().GetInt(flagMaxConcurrency)
+	maxConcurrency, err := getIntFlag(cmd, flagMaxConcurrency)
 	if err != nil {
-		return nil, fmt.Errorf("error getting max-concurrency flag: %w", err)
+		return nil, err
 	}
 
-	follow, err := cmd.Flags().GetBool(flagFollow)
+	follow, err := getBoolFlag(cmd, flagFollow)
 	if err != nil {
-		return nil, fmt.Errorf("error getting follow flag: %w", err)
+		return nil, err
 	}
 
 	level, err := effectiveLevel(cmd)
@@ -155,14 +143,14 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, err
 	}
 
-	previous, err := cmd.Flags().GetBool(flagPrevious)
+	previous, err := getBoolFlag(cmd, flagPrevious)
 	if err != nil {
-		return nil, fmt.Errorf("error getting previous flag: %w", err)
+		return nil, err
 	}
 
-	timeline, err := cmd.Flags().GetBool(flagTimeline)
+	timeline, err := getBoolFlag(cmd, flagTimeline)
 	if err != nil {
-		return nil, fmt.Errorf("error getting timeline flag: %w", err)
+		return nil, err
 	}
 
 	podName := ""

@@ -39,9 +39,9 @@ func init() {
 }
 
 func getContainerOptions(cmd *cobra.Command, args []string) (*containerOptions, error) {
-	outputFormat, err := cmd.Flags().GetString(flagOutput)
+	outputFormat, err := getStringFlag(cmd, flagOutput)
 	if err != nil {
-		return nil, fmt.Errorf("error getting output format flag: %w", err)
+		return nil, err
 	}
 
 	return &containerOptions{
