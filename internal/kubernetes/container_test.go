@@ -183,7 +183,7 @@ func TestGetLogsRejectsUnknownContainer(t *testing.T) {
 	}
 }
 
-func TestGetSingleContainerNameSingle(t *testing.T) {
+func TestSelectContainerNameSingle(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "solo", Namespace: "default"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "only", Image: "img"}}},
@@ -191,16 +191,20 @@ func TestGetSingleContainerNameSingle(t *testing.T) {
 	clientset := fake.NewSimpleClientset(pod)
 	fetcher := NewLogFetcher(clientset, "default", "solo", false, false, nil)
 
-	name, err := fetcher.getSingleContainerName(context.Background())
+	fetched, err := fetcher.getPod(context.Background())
 	if err != nil {
-		t.Fatalf("getSingleContainerName() error = %v", err)
+		t.Fatalf("getPod() error = %v", err)
+	}
+	name, err := fetcher.selectContainerName(fetched)
+	if err != nil {
+		t.Fatalf("selectContainerName() error = %v", err)
 	}
 	if name != "only" {
 		t.Fatalf("name = %q, want %q", name, "only")
 	}
 }
 
-func TestGetSingleContainerNameNoContainers(t *testing.T) {
+func TestSelectContainerNameNoContainers(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
 		Spec:       corev1.PodSpec{},
@@ -208,17 +212,21 @@ func TestGetSingleContainerNameNoContainers(t *testing.T) {
 	clientset := fake.NewSimpleClientset(pod)
 	fetcher := NewLogFetcher(clientset, "default", "empty", false, false, nil)
 
-	if _, err := fetcher.getSingleContainerName(context.Background()); err == nil {
-		t.Fatal("getSingleContainerName() error = nil, want error for pod with no containers")
+	fetched, err := fetcher.getPod(context.Background())
+	if err != nil {
+		t.Fatalf("getPod() error = %v", err)
+	}
+	if _, err := fetcher.selectContainerName(fetched); err == nil {
+		t.Fatal("selectContainerName() error = nil, want error for pod with no containers")
 	}
 }
 
-func TestGetSingleContainerNameMissingPod(t *testing.T) {
+func TestGetPodMissingPod(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	fetcher := NewLogFetcher(clientset, "default", "ghost", false, false, nil)
 
-	if _, err := fetcher.getSingleContainerName(context.Background()); err == nil {
-		t.Fatal("getSingleContainerName() error = nil, want error for missing pod")
+	if _, err := fetcher.getPod(context.Background()); err == nil {
+		t.Fatal("getPod() error = nil, want error for missing pod")
 	}
 }
 

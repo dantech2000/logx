@@ -55,11 +55,11 @@ func init() {
 	versionCmd.Flags().StringP(flagOutput, "o", "", "Output format (json or yaml)")
 }
 
-func getVersionData(version version.Version) versionData {
+func getVersionData(v version.Version) versionData {
 	return versionData{
-		Version:   version.String(),
-		Commit:    version.CommitHash,
-		BuildDate: version.BuildDate,
+		Version:   v.String(),
+		Commit:    v.CommitHash,
+		BuildDate: v.BuildDate,
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
@@ -67,8 +67,14 @@ func getVersionData(version version.Version) versionData {
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	short, _ := cmd.Flags().GetBool(flagShort)
-	output, _ := cmd.Flags().GetString(flagOutput)
+	short, err := getBoolFlag(cmd, flagShort)
+	if err != nil {
+		return err
+	}
+	output, err := getStringFlag(cmd, flagOutput)
+	if err != nil {
+		return err
+	}
 
 	return writeVersion(cmd.OutOrStdout(), version.CurrentVersion, short, output)
 }

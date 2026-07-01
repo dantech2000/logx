@@ -3,7 +3,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +29,6 @@ const (
 
 type timelineItem struct {
 	timestamp time.Time
-	order     int
 	line      string
 }
 
@@ -56,12 +55,8 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 		return err
 	}
 
-	items, err := lf.collectLogTimelineItems(ctx)
-	logErr := err
-	if err != nil {
-		items = nil
-	}
-	eventItems, eventsTruncated, err := lf.collectEventTimelineItems(ctx, len(items))
+	items, logErr := lf.collectLogTimelineItems(ctx)
+	eventItems, eventsTruncated, err := lf.collectEventTimelineItems(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,7 +68,7 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	// Container termination details (exit code, OOMKilled, signal) explain why a
 	// container died — something the events don't spell out. Reuses the pod
 	// fetched by prepareLogRequest instead of fetching it again.
-	items = append(items, lf.collectTerminationItems(pod, len(items))...)
+	items = append(items, lf.collectTerminationItems(pod)...)
 
 	// Logs failed but events are available: degrade gracefully (events often
 	// explain why logs are missing, e.g. ImagePullBackOff) while still telling
@@ -90,21 +85,20 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 		}
 	}
 
-	sort.SliceStable(items, func(i, j int) bool {
-		left, right := items[i], items[j]
-		if left.timestamp.IsZero() && right.timestamp.IsZero() {
-			return left.order < right.order
+	// Items were appended in a meaningful order (logs, then events, then
+	// terminations, each group in its own order), so a stable sort by timestamp
+	// alone keeps that order for equal keys; zero timestamps sort last.
+	slices.SortStableFunc(items, func(a, b timelineItem) int {
+		switch {
+		case a.timestamp.IsZero() && b.timestamp.IsZero():
+			return 0
+		case a.timestamp.IsZero():
+			return 1
+		case b.timestamp.IsZero():
+			return -1
+		default:
+			return a.timestamp.Compare(b.timestamp)
 		}
-		if left.timestamp.IsZero() {
-			return false
-		}
-		if right.timestamp.IsZero() {
-			return true
-		}
-		if left.timestamp.Equal(right.timestamp) {
-			return left.order < right.order
-		}
-		return left.timestamp.Before(right.timestamp)
 	})
 
 	for _, item := range items {
@@ -182,7 +176,6 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 		}
 		items = append(items, timelineItem{
 			timestamp: entry.Timestamp,
-			order:     len(items),
 			line:      formatTimelineLog(entry),
 		})
 	}
@@ -194,7 +187,7 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 
 // collectEventTimelineItems returns the timeline items for this pod's events and
 // reports whether the server-side list was truncated by the result limit.
-func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset int) ([]timelineItem, bool, error) {
+func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context) ([]timelineItem, bool, error) {
 	// Scope the server-side query to events for this pod: this avoids reading the
 	// whole namespace's events (which leaks unrelated workloads, needs broad RBAC,
 	// and floods the timeline) and bounds the result size.
@@ -217,7 +210,6 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 		timelineEvent := newTimelineEvent(event)
 		items = append(items, timelineItem{
 			timestamp: timelineEvent.Timestamp,
-			order:     orderOffset + len(items),
 			line:      formatTimelineEvent(timelineEvent),
 		})
 	}
@@ -230,17 +222,17 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 // target container — the current termination (if the container has exited) and
 // the previous instance's termination (from LastTerminationState) — carrying the
 // exit code, reason (e.g. OOMKilled), and signal.
-func (lf *LogFetcher) collectTerminationItems(pod *corev1.Pod, orderOffset int) []timelineItem {
+func (lf *LogFetcher) collectTerminationItems(pod *corev1.Pod) []timelineItem {
 	var items []timelineItem
 	for _, cs := range allContainerStatuses(pod) {
 		if cs.Name != lf.ContainerName {
 			continue
 		}
 		if t := cs.LastTerminationState.Terminated; t != nil {
-			items = append(items, terminationTimelineItem(*t, cs.Name, true, orderOffset+len(items)))
+			items = append(items, terminationTimelineItem(*t, cs.Name, true))
 		}
 		if t := cs.State.Terminated; t != nil {
-			items = append(items, terminationTimelineItem(*t, cs.Name, false, orderOffset+len(items)))
+			items = append(items, terminationTimelineItem(*t, cs.Name, false))
 		}
 	}
 	return items
@@ -257,10 +249,9 @@ func allContainerStatuses(pod *corev1.Pod) []corev1.ContainerStatus {
 	return statuses
 }
 
-func terminationTimelineItem(term corev1.ContainerStateTerminated, container string, previous bool, order int) timelineItem {
+func terminationTimelineItem(term corev1.ContainerStateTerminated, container string, previous bool) timelineItem {
 	return timelineItem{
 		timestamp: term.FinishedAt.Time,
-		order:     order,
 		line:      formatTermination(term, container, previous),
 	}
 }

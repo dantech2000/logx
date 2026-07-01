@@ -67,20 +67,9 @@ func NewLogFetcher(clientset kubernetes.Interface, namespace, podName string, fo
 	}
 }
 
-// getSingleContainerName returns the name of the container to fetch logs from.
-// If there's only one container, it returns that container's name.
-// If there are multiple containers, it prompts the user to select one.
-func (lf *LogFetcher) getSingleContainerName(ctx context.Context) (string, error) {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
-	if err != nil {
-		return "", fmt.Errorf("error fetching pod details: %w", err)
-	}
-	return lf.selectContainerName(pod)
-}
-
-// selectContainerName is the pure counterpart of getSingleContainerName: it
-// operates on an already-fetched pod so prepareLogRequest can reuse a single
-// Get call instead of fetching the pod again just to resolve the container name.
+// selectContainerName resolves the container to fetch logs from on an
+// already-fetched pod: the sole container's name when there is exactly one,
+// otherwise an interactive prompt to pick among them.
 func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 	containerCount := len(pod.Spec.Containers)
 	switch containerCount {
@@ -131,18 +120,8 @@ func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 	return containers[selectedIdx].Name, nil
 }
 
-// hasPreviousContainer checks if a container has previous terminated instances
-func (lf *LogFetcher) hasPreviousContainer(ctx context.Context, containerName string) (bool, error) {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
-	if err != nil {
-		return false, fmt.Errorf("error fetching pod details: %w", err)
-	}
-	return lf.previousContainerTerminated(pod, containerName)
-}
-
-// previousContainerTerminated is the pure counterpart of hasPreviousContainer:
-// it operates on an already-fetched pod so prepareLogRequest can reuse a single
-// Get call instead of fetching the pod again just to check restart history.
+// previousContainerTerminated reports, from an already-fetched pod, whether the
+// named container has restarted — i.e. whether --previous has logs to fetch.
 func (lf *LogFetcher) previousContainerTerminated(pod *corev1.Pod, containerName string) (bool, error) {
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == containerName {
@@ -150,39 +129,6 @@ func (lf *LogFetcher) previousContainerTerminated(pod *corev1.Pod, containerName
 		}
 	}
 	return false, fmt.Errorf("container %q not found in pod %q", containerName, lf.PodName)
-}
-
-// LogWriter is an io.Writer that feeds each written line through a shared
-// logging.Pipeline and writes the rendered result. It expects exactly one log
-// line per Write call (with no embedded newline), which is how GetLogs drives it
-// from the line reader; this per-line contract is also what lets later features
-// (multi-container / multi-pod) wrap one LogWriter per stream and merge them.
-type LogWriter struct {
-	writer   io.Writer
-	pipeline *logging.Pipeline
-}
-
-// Write implements io.Writer. p must be a single log line.
-func (w *LogWriter) Write(p []byte) (n int, err error) {
-	out, ok := w.pipeline.ProcessLine(string(p))
-	if !ok {
-		return len(p), nil
-	}
-	if _, err := fmt.Fprintln(w.writer, out); err != nil {
-		return len(p), err
-	}
-	return len(p), nil
-}
-
-// NewLogWriter creates a LogWriter that emits every entry at or above DEBUG.
-func NewLogWriter(w io.Writer) *LogWriter {
-	return NewLogWriterWithPipeline(w, logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.DEBUG}))
-}
-
-// NewLogWriterWithPipeline creates a LogWriter backed by a caller-configured
-// Pipeline, so the filter level (and later, richer filters) is set in one place.
-func NewLogWriterWithPipeline(w io.Writer, pipeline *logging.Pipeline) *LogWriter {
-	return &LogWriter{writer: w, pipeline: pipeline}
 }
 
 // GetLogs retrieves logs from the specified container.
