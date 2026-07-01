@@ -58,7 +58,7 @@ func TestParseLogEntry(t *testing.T) {
 				Message: "Server started",
 				Format:  FormatJSON,
 				Logger:  "logrus",
-				Fields: map[string]interface{}{
+				Fields: map[string]any{
 					"level": "info",
 					"msg":   "Server started",
 					"time":  "2024-03-15T12:19:57Z",
@@ -74,7 +74,7 @@ func TestParseLogEntry(t *testing.T) {
 				Message: "Failed to process request",
 				Format:  FormatJSON,
 				Logger:  "zap",
-				Fields: map[string]interface{}{
+				Fields: map[string]any{
 					"level":  "error",
 					"ts":     json.Number("1647340797"),
 					"caller": "api/handler.go:42",
@@ -635,12 +635,12 @@ func TestParseLogLevel(t *testing.T) {
 func TestDetectLogger(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    map[string]interface{}
+		input    map[string]any
 		expected string
 	}{
 		{
 			name: "Zap logger",
-			input: map[string]interface{}{
+			input: map[string]any{
 				"caller": "main.go:42",
 				"ts":     1647340797,
 			},
@@ -648,7 +648,7 @@ func TestDetectLogger(t *testing.T) {
 		},
 		{
 			name: "Bunyan logger",
-			input: map[string]interface{}{
+			input: map[string]any{
 				"@level":     "info",
 				"@timestamp": "2024-03-15T12:19:57Z",
 			},
@@ -656,7 +656,7 @@ func TestDetectLogger(t *testing.T) {
 		},
 		{
 			name: "Logrus logger",
-			input: map[string]interface{}{
+			input: map[string]any{
 				"level": "info",
 				"msg":   "test message",
 			},
@@ -664,7 +664,7 @@ func TestDetectLogger(t *testing.T) {
 		},
 		{
 			name: "Unknown logger",
-			input: map[string]interface{}{
+			input: map[string]any{
 				"custom": "field",
 			},
 			expected: "",

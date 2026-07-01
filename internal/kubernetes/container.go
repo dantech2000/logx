@@ -4,6 +4,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
@@ -161,10 +162,5 @@ func podContainerNames(pod *corev1.Pod) []string {
 // podHasContainer reports whether the pod defines a container with the given
 // name, including init and ephemeral containers (which also have fetchable logs).
 func podHasContainer(pod *corev1.Pod, name string) bool {
-	for _, s := range allContainerSpecs(pod) {
-		if s.name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(allContainerSpecs(pod), func(s containerSpec) bool { return s.name == name })
 }

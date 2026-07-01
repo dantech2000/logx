@@ -143,7 +143,7 @@ func FuzzPipelineAllFeatures(f *testing.F) {
 			opts.Output = OutputJSON
 		}
 		// One line at a time (the scanner guarantees no embedded newlines).
-		for _, line := range strings.Split(data, "\n") {
+		for line := range strings.SplitSeq(data, "\n") {
 			out, ok := NewPipeline(opts).ProcessLine(line)
 			if !ok {
 				continue

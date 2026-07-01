@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -267,7 +268,7 @@ func containsAttentionText(value string) bool {
 		strings.Contains(lowerValue, "warn")
 }
 
-func formatSortedFields(fields map[string]interface{}) []string {
+func formatSortedFields(fields map[string]any) []string {
 	formattedFields := make([]string, 0, len(fields))
 	for _, key := range sortedKeys(fields) {
 		if jsonFormattedFieldExclusions[key] || isJSONMessageField(key) {
@@ -284,16 +285,11 @@ func isJSONMessageField(field string) bool {
 	return jsonMessageFieldSet[field]
 }
 
-func sortedKeys(data map[string]interface{}) []string {
-	keys := make([]string, 0, len(data))
-	for key := range data {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	return keys
+func sortedKeys(data map[string]any) []string {
+	return slices.Sorted(maps.Keys(data))
 }
 
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return formatStringValue(val)
@@ -315,7 +311,7 @@ func formatValue(v interface{}) string {
 		return formatJSONNumber(val)
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return valueColor().Sprintf("%d", val)
-	case map[string]interface{}:
+	case map[string]any:
 		parts := make([]string, 0, len(val))
 		for _, key := range sortedKeys(val) {
 			parts = append(parts, fmt.Sprintf("%s=%s",
@@ -323,7 +319,7 @@ func formatValue(v interface{}) string {
 				formatValue(val[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, " "))
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(val))
 		for _, item := range val {
 			parts = append(parts, formatValue(item))

@@ -16,7 +16,7 @@ func TestFormatLogEntryDetailsDeterministicJSONFields(t *testing.T) {
 	entry := ParseLogEntry(`{"message":"done","zeta":1,"alpha":"first","nested":{"z":2,"a":1},"level":"info","loglevel":"ignored","time":"2026-05-20T20:37:54Z","ts":1779309485}`)
 
 	first := FormatLogEntryDetails(entry)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if got := FormatLogEntryDetails(entry); got != first {
 			t.Fatalf("FormatLogEntryDetails changed between runs: first=%q got=%q", first, got)
 		}
@@ -38,9 +38,9 @@ func TestFormatLogEntryDetailsDeterministicJSONFields(t *testing.T) {
 func TestFormatLogEntryDetailsFormatsArraysAndNumbers(t *testing.T) {
 	entry := LogEntry{
 		Format: FormatJSON,
-		Fields: map[string]interface{}{
+		Fields: map[string]any{
 			"message": "batch complete",
-			"ids":     []interface{}{float64(3), "two", true},
+			"ids":     []any{float64(3), "two", true},
 			"count":   int64(7),
 			"ratio":   float32(1.5),
 		},

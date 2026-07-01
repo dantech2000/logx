@@ -166,13 +166,7 @@ func (lf *LogFetcher) effectiveMaxConcurrency(streamCount int) int {
 	if limit <= 0 {
 		limit = defaultMaxConcurrency
 	}
-	if limit > streamCount {
-		limit = streamCount
-	}
-	if limit < 1 {
-		limit = 1
-	}
-	return limit
+	return max(1, min(limit, streamCount))
 }
 
 // streamPrefixed reads one container's logs through a private pipeline and writes

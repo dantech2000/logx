@@ -54,14 +54,11 @@ func (lr *LineReader) Scan() bool {
 			if err == nil { // frag includes the trailing '\n'
 				chunk = frag[:len(frag)-1]
 			}
-			if room := MaxLogLineSize - b.Len(); room > 0 {
-				if len(chunk) > room {
-					b.Write(chunk[:room])
-					truncated = true
-				} else {
-					b.Write(chunk)
-				}
-			} else if len(chunk) > 0 {
+			// Keep at most the room left under MaxLogLineSize; anything beyond
+			// it is dropped and the line marked truncated.
+			keep := min(len(chunk), max(MaxLogLineSize-b.Len(), 0))
+			b.Write(chunk[:keep])
+			if keep < len(chunk) {
 				truncated = true
 			}
 		}

@@ -22,7 +22,7 @@ func (yamlFlowParser) Parse(line string) (LogEntry, bool) {
 	if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
 		return LogEntry{}, false
 	}
-	var data map[string]interface{}
+	var data map[string]any
 	if err := yaml.Unmarshal([]byte(trimmed), &data); err != nil || len(data) == 0 {
 		return LogEntry{}, false
 	}
@@ -61,7 +61,7 @@ func (xmlLogParser) Parse(line string) (LogEntry, bool) {
 		return LogEntry{}, false
 	}
 
-	fields := make(map[string]interface{})
+	fields := make(map[string]any)
 	for _, a := range xmlAttrRegex.FindAllStringSubmatch(attrPart, -1) {
 		fields[a[1]] = a[2]
 	}

@@ -66,7 +66,7 @@ func TestMarshalProjectedJSON(t *testing.T) {
 		ParseLogEntry(`{"level":"warn","status":404,"path":"/x","msg":"nope"}`),
 		[]string{"level", "status", "missing"},
 	)
-	var obj map[string]interface{}
+	var obj map[string]any
 	if err := json.Unmarshal([]byte(out), &obj); err != nil {
 		t.Fatalf("invalid JSON: %v (%s)", err, out)
 	}

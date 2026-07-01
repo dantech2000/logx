@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -77,10 +78,10 @@ func (c fileConfig) applyFieldAliases() {
 // stringDefault returns the config value when the flag was not explicitly set
 // and the config provides one, implementing flag > config > built-in precedence.
 func stringDefault(flagValue, configValue string, changed bool) string {
-	if !changed && configValue != "" {
-		return configValue
+	if changed {
+		return flagValue
 	}
-	return flagValue
+	return cmp.Or(configValue, flagValue)
 }
 
 // effectiveLevel resolves the level string with flag > config > built-in default.

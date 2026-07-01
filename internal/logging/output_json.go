@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // OutputFormat selects how the pipeline renders each kept entry.
@@ -39,12 +40,12 @@ var formatNames = map[LogFormat]string{
 // jsonEntry is the normalized shape emitted by --output json. It is intentionally
 // stable so downstream tooling can rely on it regardless of the source format.
 type jsonEntry struct {
-	Time    string                 `json:"time,omitempty"`
-	Level   string                 `json:"level"`
-	Logger  string                 `json:"logger,omitempty"`
-	Message string                 `json:"message,omitempty"`
-	Format  string                 `json:"format"`
-	Fields  map[string]interface{} `json:"fields,omitempty"`
+	Time    string         `json:"time,omitempty"`
+	Level   string         `json:"level"`
+	Logger  string         `json:"logger,omitempty"`
+	Message string         `json:"message,omitempty"`
+	Format  string         `json:"format"`
+	Fields  map[string]any `json:"fields,omitempty"`
 }
 
 // MarshalEntryJSON renders a parsed entry as a single normalized JSON object.
@@ -63,7 +64,7 @@ func MarshalEntryJSON(entry LogEntry) string {
 		out.Message = ""
 	}
 	if !entry.Timestamp.IsZero() {
-		out.Time = entry.Timestamp.UTC().Format("2006-01-02T15:04:05Z07:00")
+		out.Time = entry.Timestamp.UTC().Format(time.RFC3339)
 	}
 	return marshalLine(out)
 }
@@ -77,7 +78,7 @@ func MarshalProjectedJSON(entry LogEntry, fields []string) string {
 // marshalProjectedJSON is MarshalProjectedJSON over pre-classified keys, the
 // form the pipeline uses so the virtual-key groups are not re-scanned per line.
 func marshalProjectedJSON(entry LogEntry, fields []projectedField) string {
-	obj := make(map[string]interface{}, len(fields))
+	obj := make(map[string]any, len(fields))
 	for _, f := range fields {
 		if v, ok := projectRawValue(entry, f); ok {
 			obj[f.key] = v
@@ -88,11 +89,11 @@ func marshalProjectedJSON(entry LogEntry, fields []projectedField) string {
 
 // extraFields returns the structured fields minus the ones already surfaced as
 // dedicated columns (level/time/message), so JSON output isn't redundant.
-func extraFields(fields map[string]interface{}) map[string]interface{} {
+func extraFields(fields map[string]any) map[string]any {
 	if len(fields) == 0 {
 		return nil
 	}
-	out := make(map[string]interface{}, len(fields))
+	out := make(map[string]any, len(fields))
 	for k, v := range fields {
 		if jsonFormattedFieldExclusions[k] || isJSONMessageField(k) {
 			continue
@@ -107,14 +108,14 @@ func extraFields(fields map[string]interface{}) map[string]interface{} {
 
 // projectRawValue returns the raw value for a projection key, handling the level
 // virtual key (which resolveByKind leaves to the predicate engine).
-func projectRawValue(entry LogEntry, f projectedField) (interface{}, bool) {
+func projectRawValue(entry LogEntry, f projectedField) (any, bool) {
 	if f.kind == fieldKindLevel {
 		return entry.Level.String(), true
 	}
 	return resolveByKind(entry, f.kind, f.key)
 }
 
-func marshalLine(v interface{}) string {
+func marshalLine(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return "{}"

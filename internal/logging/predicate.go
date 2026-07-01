@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +21,7 @@ var (
 )
 
 func keyIn(key string, set []string) bool {
-	for _, k := range set {
-		if strings.EqualFold(key, k) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(set, func(k string) bool { return strings.EqualFold(key, k) })
 }
 
 // fieldKind classifies a predicate's key once (at parse time) into one of the
@@ -277,7 +273,7 @@ func (fp FieldPredicate) evalLevel(level LogLevel) bool {
 // resolved here: the predicate engine compares levels by severity and the
 // projections render them specially, so a level kind falls through to the
 // structured-field lookup like any other plain key.
-func resolveByKind(entry LogEntry, kind fieldKind, key string) (interface{}, bool) {
+func resolveByKind(entry LogEntry, kind fieldKind, key string) (any, bool) {
 	switch kind {
 	case fieldKindMessage:
 		if entry.Message != "" {
@@ -304,6 +300,6 @@ func resolveByKind(entry LogEntry, kind fieldKind, key string) (interface{}, boo
 // resolveValue resolves the predicate's key against an entry, dispatching on
 // the key's precomputed kind instead of re-scanning the virtual-key groups on
 // every call, which matters here since Eval runs once per predicate per log line.
-func (fp FieldPredicate) resolveValue(entry LogEntry) (interface{}, bool) {
+func (fp FieldPredicate) resolveValue(entry LogEntry) (any, bool) {
 	return resolveByKind(entry, fp.kind, fp.key)
 }
