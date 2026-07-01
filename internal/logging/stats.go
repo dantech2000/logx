@@ -1,10 +1,12 @@
 package logging
 
 import (
+	"cmp"
+	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -120,6 +122,12 @@ func toInt(v interface{}) (int, bool) {
 		return int(n), true
 	case int:
 		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(n))
+		return i, err == nil
 	default:
 		i, err := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", v)))
 		return i, err == nil
@@ -171,7 +179,7 @@ func (s *Stats) writeStatusClasses(b *strings.Builder) {
 	for c := range s.statusClass {
 		classes = append(classes, c)
 	}
-	sort.Ints(classes)
+	slices.Sort(classes)
 	parts := make([]string, 0, len(classes))
 	for _, c := range classes {
 		parts = append(parts, fmt.Sprintf("%dxx %d", c, s.statusClass[c]))
@@ -191,11 +199,11 @@ func (s *Stats) writeTopMessages(b *strings.Builder, n int) {
 	for m, c := range s.messages {
 		ranked = append(ranked, kv{m, c})
 	}
-	sort.Slice(ranked, func(i, j int) bool {
-		if ranked[i].count != ranked[j].count {
-			return ranked[i].count > ranked[j].count
+	slices.SortFunc(ranked, func(a, b kv) int {
+		if a.count != b.count {
+			return cmp.Compare(b.count, a.count) // descending by count
 		}
-		return ranked[i].msg < ranked[j].msg
+		return cmp.Compare(a.msg, b.msg)
 	})
 	if len(ranked) > n {
 		ranked = ranked[:n]

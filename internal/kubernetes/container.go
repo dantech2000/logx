@@ -60,16 +60,9 @@ func stateWithReason(state, reason string) string {
 // GetContainerStatus returns the ready state and status string for a container,
 // searching regular, init, and ephemeral container statuses.
 func GetContainerStatus(pod *corev1.Pod, containerName string) (bool, string) {
-	statusGroups := [][]corev1.ContainerStatus{
-		pod.Status.ContainerStatuses,
-		pod.Status.InitContainerStatuses,
-		pod.Status.EphemeralContainerStatuses,
-	}
-	for _, group := range statusGroups {
-		for _, status := range group {
-			if status.Name == containerName {
-				return status.Ready, GetContainerState(status.State)
-			}
+	for _, status := range allContainerStatuses(pod) {
+		if status.Name == containerName {
+			return status.Ready, GetContainerState(status.State)
 		}
 	}
 	return false, "Unknown"
@@ -101,6 +94,34 @@ func FormatContainerInfo(info ContainerInfo) string {
 		terminal.Sanitize(info.Image))
 }
 
+// containerSpec is a minimal, common view over corev1.Container and
+// corev1.EphemeralContainer — the two have different Kubernetes API types, but
+// expose the same name/image shape, so this lets the three spec groups
+// (regular, init, ephemeral) be walked once instead of once per helper.
+type containerSpec struct {
+	name  string
+	image string
+	kind  string
+}
+
+// allContainerSpecs returns every container defined on the pod — regular, init,
+// then ephemeral — in a single, stable-ordered slice. The spec-side counterpart
+// of allContainerStatuses (timeline.go).
+func allContainerSpecs(pod *corev1.Pod) []containerSpec {
+	specs := make([]containerSpec, 0,
+		len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers))
+	for _, c := range pod.Spec.Containers {
+		specs = append(specs, containerSpec{name: c.Name, image: c.Image})
+	}
+	for _, c := range pod.Spec.InitContainers {
+		specs = append(specs, containerSpec{name: c.Name, image: c.Image, kind: containerKindInit})
+	}
+	for _, c := range pod.Spec.EphemeralContainers {
+		specs = append(specs, containerSpec{name: c.Name, image: c.Image, kind: containerKindEphemeral})
+	}
+	return specs
+}
+
 // ListContainers returns detailed information about containers in a pod
 func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) ([]ContainerInfo, error) {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
@@ -108,15 +129,20 @@ func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespa
 		return nil, fmt.Errorf("error fetching pod details: %w", err)
 	}
 
-	var containers []ContainerInfo
-	for _, container := range pod.Spec.Containers {
-		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, ""))
+	statuses := make(map[string]corev1.ContainerStatus, len(pod.Status.ContainerStatuses)+
+		len(pod.Status.InitContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
+	for _, s := range allContainerStatuses(pod) {
+		statuses[s.Name] = s
 	}
-	for _, container := range pod.Spec.InitContainers {
-		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, containerKindInit))
-	}
-	for _, container := range pod.Spec.EphemeralContainers {
-		containers = append(containers, containerInfoFor(pod, container.Name, container.Image, containerKindEphemeral))
+
+	specs := allContainerSpecs(pod)
+	containers := make([]ContainerInfo, len(specs))
+	for i, spec := range specs {
+		ready, status := false, "Unknown"
+		if s, ok := statuses[spec.name]; ok {
+			ready, status = s.Ready, GetContainerState(s.State)
+		}
+		containers[i] = ContainerInfo{Name: spec.name, Ready: ready, Status: status, Image: spec.image, Kind: spec.kind}
 	}
 
 	return containers, nil
@@ -125,15 +151,10 @@ func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespa
 // podContainerNames returns every container name whose logs can be fetched —
 // regular, then init, then ephemeral — in a stable order.
 func podContainerNames(pod *corev1.Pod) []string {
-	names := make([]string, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers))
-	for _, c := range pod.Spec.Containers {
-		names = append(names, c.Name)
-	}
-	for _, c := range pod.Spec.InitContainers {
-		names = append(names, c.Name)
-	}
-	for _, c := range pod.Spec.EphemeralContainers {
-		names = append(names, c.Name)
+	specs := allContainerSpecs(pod)
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.name
 	}
 	return names
 }
@@ -141,31 +162,10 @@ func podContainerNames(pod *corev1.Pod) []string {
 // podHasContainer reports whether the pod defines a container with the given
 // name, including init and ephemeral containers (which also have fetchable logs).
 func podHasContainer(pod *corev1.Pod, name string) bool {
-	for _, c := range pod.Spec.Containers {
-		if c.Name == name {
-			return true
-		}
-	}
-	for _, c := range pod.Spec.InitContainers {
-		if c.Name == name {
-			return true
-		}
-	}
-	for _, c := range pod.Spec.EphemeralContainers {
-		if c.Name == name {
+	for _, s := range allContainerSpecs(pod) {
+		if s.name == name {
 			return true
 		}
 	}
 	return false
-}
-
-func containerInfoFor(pod *corev1.Pod, name, image, kind string) ContainerInfo {
-	ready, status := GetContainerStatus(pod, name)
-	return ContainerInfo{
-		Name:   name,
-		Ready:  ready,
-		Status: status,
-		Image:  image,
-		Kind:   kind,
-	}
 }

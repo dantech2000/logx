@@ -2,7 +2,6 @@ package logging
 
 import (
 	"encoding/csv"
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -29,21 +28,12 @@ func (yamlFlowParser) Parse(line string) (LogEntry, bool) {
 	}
 	// Require a recognized level or message key so a stray "{note: ...}" or a code
 	// snippet in a log line is not claimed as a structured entry.
-	if !hasAnyKey(data, jsonLevelFields) && !hasAnyKey(data, jsonMessageFields) {
+	if !hasAnyField(data, jsonLevelFields) && !hasAnyField(data, jsonMessageFields) {
 		return LogEntry{}, false
 	}
 	// A YAML flow map is JSON-equivalent for our purposes, so reuse the JSON
 	// field extraction (level/message/timestamp/logger).
 	return parseJSONLog(trimmed, data), true
-}
-
-func hasAnyKey(data map[string]interface{}, keys []string) bool {
-	for _, k := range keys {
-		if _, ok := data[k]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // --- XML elements: <log level="ERROR" ts="...">message</log> --------------
@@ -81,7 +71,7 @@ func (xmlLogParser) Parse(line string) (LogEntry, bool) {
 	}
 
 	entry := LogEntry{Format: FormatLogfmt, Fields: fields, RawLine: line}
-	if level, ok := levelFromFields(fields); ok {
+	if level, ok := parseJSONLevel(fields); ok {
 		entry.Level, entry.LevelDetected = level, true
 	}
 	if logger, ok := firstStringField(fields, "logger", "name", "source", "category"); ok {
@@ -163,16 +153,4 @@ func levelToken(s string) (LogLevel, bool) {
 	default:
 		return DEBUG, false
 	}
-}
-
-// levelFromFields resolves a level from a field map (used by the XML parser).
-func levelFromFields(fields map[string]interface{}) (LogLevel, bool) {
-	for _, name := range jsonLevelFields {
-		if v, ok := fields[name]; ok {
-			if lvl, err := ParseLogLevel(fmt.Sprintf("%v", v)); err == nil {
-				return lvl, true
-			}
-		}
-	}
-	return DEBUG, false
 }

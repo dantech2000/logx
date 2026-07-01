@@ -75,7 +75,13 @@ func (lf *LogFetcher) getSingleContainerName(ctx context.Context) (string, error
 	if err != nil {
 		return "", fmt.Errorf("error fetching pod details: %w", err)
 	}
+	return lf.selectContainerName(pod)
+}
 
+// selectContainerName is the pure counterpart of getSingleContainerName: it
+// operates on an already-fetched pod so prepareLogRequest can reuse a single
+// Get call instead of fetching the pod again just to resolve the container name.
+func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 	containerCount := len(pod.Spec.Containers)
 	switch containerCount {
 	case 0:
@@ -115,8 +121,7 @@ func (lf *LogFetcher) getSingleContainerName(ctx context.Context) (string, error
 	}
 
 	// Show the prompt and get user's selection
-	err = survey.AskOne(prompt, &selectedIdx, survey.WithPageSize(10))
-	if err != nil {
+	if err := survey.AskOne(prompt, &selectedIdx, survey.WithPageSize(10)); err != nil {
 		if errors.Is(err, terminal.InterruptErr) {
 			return "", errors.New("operation cancelled")
 		}
@@ -132,7 +137,13 @@ func (lf *LogFetcher) hasPreviousContainer(ctx context.Context, containerName st
 	if err != nil {
 		return false, fmt.Errorf("error fetching pod details: %w", err)
 	}
+	return lf.previousContainerTerminated(pod, containerName)
+}
 
+// previousContainerTerminated is the pure counterpart of hasPreviousContainer:
+// it operates on an already-fetched pod so prepareLogRequest can reuse a single
+// Get call instead of fetching the pod again just to check restart history.
+func (lf *LogFetcher) previousContainerTerminated(pod *corev1.Pod, containerName string) (bool, error) {
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == containerName {
 			return status.RestartCount > 0, nil
@@ -178,7 +189,7 @@ func NewLogWriterWithPipeline(w io.Writer, pipeline *logging.Pipeline) *LogWrite
 // If no container is specified, it will prompt the user to select one.
 // It handles both current and previous container instances based on the Previous flag.
 func (lf *LogFetcher) GetLogs(ctx context.Context) error {
-	if err := lf.prepareLogRequest(ctx); err != nil {
+	if _, err := lf.prepareLogRequest(ctx); err != nil {
 		return err
 	}
 

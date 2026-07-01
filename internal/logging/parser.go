@@ -123,7 +123,7 @@ var (
 	logfmtKeyRegex = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
 
-var httpContextFields = buildStringSet([]string{
+var httpContextFields = []string{
 	"method",
 	"path",
 	"route",
@@ -140,7 +140,7 @@ var httpContextFields = buildStringSet([]string{
 	"http.route",
 	"http.target",
 	"http.url",
-})
+}
 
 var httpStatusFields = []string{
 	"status",
@@ -530,8 +530,15 @@ func statusClassLevel(status int) (LogLevel, bool) {
 }
 
 func hasHTTPContext(data map[string]interface{}) bool {
-	for field := range httpContextFields {
-		if _, ok := fieldValue(data, field); ok {
+	return hasAnyField(data, httpContextFields)
+}
+
+// hasAnyField reports whether data has a value for any of keys, dot-path aware
+// (e.g. "request.method" walks into a nested map). Shared by hasHTTPContext and
+// the XML/CSV format detectors so both use the same field-presence semantics.
+func hasAnyField(data map[string]interface{}, keys []string) bool {
+	for _, key := range keys {
+		if _, ok := fieldValue(data, key); ok {
 			return true
 		}
 	}
@@ -611,10 +618,10 @@ func splitTrailingFields(message string) (string, map[string]interface{}) {
 	fieldStart := len(parts)
 
 	for i := len(parts) - 1; i >= 0; i-- {
-		if !isSimpleField(parts[i]) {
+		key, value, ok := simpleField(parts[i])
+		if !ok {
 			break
 		}
-		key, value, _ := strings.Cut(parts[i], "=")
 		fields[key] = strings.Trim(value, `"`)
 		fieldStart = i
 	}
@@ -625,14 +632,20 @@ func splitTrailingFields(message string) (string, map[string]interface{}) {
 	return strings.Join(parts[:fieldStart], " "), fields
 }
 
-func isSimpleField(value string) bool {
-	key, fieldValue, ok := strings.Cut(value, "=")
+// simpleField reports whether value looks like a "key=value" field and, if so,
+// returns the split key/value in the same pass (the caller would otherwise redo
+// this same Cut just to get the pieces it already confirmed exist).
+func simpleField(value string) (key, fieldValue string, ok bool) {
+	key, fieldValue, ok = strings.Cut(value, "=")
 	if !ok || key == "" || fieldValue == "" {
-		return false
+		return "", "", false
 	}
 	// Only treat identifier-like keys as fields; this keeps URLs and paths that
 	// happen to contain '=' (e.g. query strings) inside the message text.
-	return logfmtKeyRegex.MatchString(key)
+	if !logfmtKeyRegex.MatchString(key) {
+		return "", "", false
+	}
+	return key, fieldValue, true
 }
 
 func parseLogfmtFields(line string) (map[string]interface{}, bool) {

@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/dantech2000/logx/internal/kubernetes"
 	"github.com/spf13/cobra"
 	k8skubernetes "k8s.io/client-go/kubernetes"
@@ -15,19 +13,19 @@ func addKubeFlags(cmd *cobra.Command) {
 }
 
 func kubeOptionsFromFlags(cmd *cobra.Command) (kubernetes.ClientOptions, error) {
-	namespace, err := cmd.Flags().GetString(flagNamespace)
+	namespace, err := getStringFlag(cmd, flagNamespace)
 	if err != nil {
-		return kubernetes.ClientOptions{}, fmt.Errorf("error getting namespace flag: %w", err)
+		return kubernetes.ClientOptions{}, err
 	}
 
-	contextName, err := cmd.Flags().GetString(flagContext)
+	contextName, err := getStringFlag(cmd, flagContext)
 	if err != nil {
-		return kubernetes.ClientOptions{}, fmt.Errorf("error getting context flag: %w", err)
+		return kubernetes.ClientOptions{}, err
 	}
 
-	kubeconfig, err := cmd.Flags().GetString(flagKubeconfig)
+	kubeconfig, err := getStringFlag(cmd, flagKubeconfig)
 	if err != nil {
-		return kubernetes.ClientOptions{}, fmt.Errorf("error getting kubeconfig flag: %w", err)
+		return kubernetes.ClientOptions{}, err
 	}
 
 	return kubernetes.ClientOptions{

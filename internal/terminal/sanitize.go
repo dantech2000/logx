@@ -18,6 +18,7 @@ import (
 // leave the raw byte in the output via the unchanged fast path.
 func Sanitize(value string) string {
 	var builder strings.Builder
+	builder.Grow(len(value))
 	changed := false
 
 	for i := 0; i < len(value); {

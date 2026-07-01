@@ -18,6 +18,7 @@ func RegisterFieldAliases(levelFields, messageFields, timeFields []string) {
 	logfmtTimeFields = appendUnique(logfmtTimeFields, timeFields)
 
 	jsonFormattedFieldExclusions = buildStringSet(jsonLevelFields, jsonTimeFields)
+	jsonMessageFieldSet = buildStringSet(jsonMessageFields)
 }
 
 // appendUnique appends each value not already present in base, preserving order.

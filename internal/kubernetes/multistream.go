@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/dantech2000/logx/internal/logging"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -127,44 +128,29 @@ type prefixedStream struct {
 const defaultMaxConcurrency = 10
 
 // fanInStreams runs the streams through a bounded worker pool, serializing writes
-// to the shared writer, and returns the first error encountered. When --stats is
-// set every worker records into a single thread-safe Stats and the aggregated
-// digest is written once after all streams finish (per-line output is suppressed
-// in stats mode, so nothing is interleaved before it).
+// to the shared writer, and returns the first error encountered. A failing
+// stream does not cancel its siblings — each runs to completion independently.
+// When --stats is set every worker records into a single thread-safe Stats and
+// the aggregated digest is written once after all streams finish (per-line
+// output is suppressed in stats mode, so nothing is interleaved before it).
 func (lf *LogFetcher) fanInStreams(ctx context.Context, streams []prefixedStream) error {
-	var (
-		mu       sync.Mutex // serializes writes to lf.Writer
-		wg       sync.WaitGroup
-		errOnce  sync.Once
-		firstErr error
-	)
+	var mu sync.Mutex // serializes writes to lf.Writer
 
 	var shared *logging.Stats
 	if lf.Filters.CollectStats {
 		shared = logging.NewStats()
 	}
 
-	workers := lf.effectiveMaxConcurrency(len(streams))
-	jobs := make(chan prefixedStream)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for s := range jobs {
-				if err := lf.streamPrefixed(ctx, s, &mu, shared); err != nil {
-					errOnce.Do(func() { firstErr = err })
-				}
-			}
-		}()
-	}
+	var g errgroup.Group
+	g.SetLimit(lf.effectiveMaxConcurrency(len(streams)))
 	for _, s := range streams {
-		jobs <- s
+		g.Go(func() error {
+			return lf.streamPrefixed(ctx, s, &mu, shared)
+		})
 	}
-	close(jobs)
-	wg.Wait()
 
-	if firstErr != nil {
-		return firstErr
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	if shared != nil {
 		return shared.Write(lf.Writer)
