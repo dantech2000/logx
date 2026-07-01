@@ -120,9 +120,9 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 // returning the pod so callers with further pod-shaped work (e.g. GetTimeline's
 // termination lookup) don't need to fetch it again.
 func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error) {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
+	pod, err := lf.getPod(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching pod details: %w", err)
+		return nil, err
 	}
 
 	if lf.ContainerName == "" {
@@ -369,17 +369,16 @@ func formatTimelineEvent(event timelineEvent) string {
 	if event.Count > 1 {
 		message = fmt.Sprintf("%s (x%d)", message, event.Count)
 	}
+	// event.Object was sanitized when built (formatEventObject); it contributes
+	// an optional segment between the type and the reason.
+	object := ""
 	if event.Object != "" {
-		return fmt.Sprintf("%s [EVENT] [%s] %s %s: %s",
-			formatTimelineTimestamp(event.Timestamp),
-			formatTimelineEventType(event),
-			event.Object,
-			terminal.Sanitize(event.Reason),
-			message)
+		object = " " + event.Object
 	}
-	return fmt.Sprintf("%s [EVENT] [%s] %s: %s",
+	return fmt.Sprintf("%s [EVENT] [%s]%s %s: %s",
 		formatTimelineTimestamp(event.Timestamp),
 		formatTimelineEventType(event),
+		object,
 		terminal.Sanitize(event.Reason),
 		message)
 }
@@ -421,5 +420,5 @@ func formatTimelineTimestamp(timestamp time.Time) string {
 	if timestamp.IsZero() {
 		return "[no timestamp]"
 	}
-	return fmt.Sprintf("[%s]", timestamp.UTC().Format("2006-01-02 15:04:05"))
+	return fmt.Sprintf("[%s]", timestamp.UTC().Format(logging.DisplayTimeLayout))
 }

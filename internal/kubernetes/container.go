@@ -8,7 +8,6 @@ import (
 	"github.com/dantech2000/logx/internal/terminal"
 	"github.com/fatih/color"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -124,9 +123,9 @@ func allContainerSpecs(pod *corev1.Pod) []containerSpec {
 
 // ListContainers returns detailed information about containers in a pod
 func ListContainers(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) ([]ContainerInfo, error) {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	pod, err := fetchPod(ctx, clientset, namespace, podName)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching pod details: %w", err)
+		return nil, err
 	}
 
 	statuses := make(map[string]corev1.ContainerStatus, len(pod.Status.ContainerStatuses)+

@@ -114,8 +114,14 @@ var logParsers = []logParser{
 	csvLogParser{},
 }
 
+// kubeletTimestampPattern is the RFC3339 shape of a kubelet --timestamps prefix.
+// It is the shared core of kubernetesTimestampPrefixRegex (below) and
+// kubeletTimestampSepRegex (continuation.go) so the two cannot drift; they
+// intentionally differ only in the separator they consume.
+const kubeletTimestampPattern = `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z`
+
 var (
-	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s+(.*)$`)
+	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(` + kubeletTimestampPattern + `)\s+(.*)$`)
 	plainTextTimestampRegex        = regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
 	plainTextLevelRegex            = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)([^[:alnum:]_]|$)`)
 	// logfmtKeyRegex matches identifier-like logfmt keys so that tokens such as a
@@ -400,8 +406,7 @@ func parseJSONLog(line string, data map[string]interface{}) LogEntry {
 func parseJSONLevel(data map[string]interface{}) (LogLevel, bool) {
 	for _, field := range jsonLevelFields {
 		if val, ok := fieldValue(data, field); ok {
-			levelStr := fmt.Sprintf("%v", val)
-			if level, err := ParseLogLevel(levelStr); err == nil {
+			if level, err := ParseLogLevel(stringValue(val)); err == nil {
 				return level, true
 			}
 		}
@@ -415,12 +420,12 @@ func parseJSONLevel(data map[string]interface{}) (LogLevel, bool) {
 func parseJSONMessage(line string, data map[string]interface{}) string {
 	for _, field := range jsonMessageFields {
 		if val, ok := fieldValue(data, field); ok {
-			return fmt.Sprintf("%v", val)
+			return stringValue(val)
 		}
 	}
 
 	if err, ok := data["error"]; ok {
-		return fmt.Sprintf("%v", err)
+		return stringValue(err)
 	}
 	return line
 }
@@ -488,23 +493,8 @@ func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
 		return DEBUG, false
 	}
 
-	var status int
-	switch value := statusValue.(type) {
-	case float64:
-		status = int(value)
-	case json.Number:
-		parsedStatus, err := strconv.Atoi(value.String())
-		if err != nil {
-			return DEBUG, false
-		}
-		status = parsedStatus
-	case string:
-		parsedStatus, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil {
-			return DEBUG, false
-		}
-		status = parsedStatus
-	default:
+	status, ok := toInt(statusValue)
+	if !ok {
 		return DEBUG, false
 	}
 

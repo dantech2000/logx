@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/dantech2000/logx/internal/kubernetes"
-	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,7 +19,6 @@ type logOptions struct {
 	stats          bool
 	maxConcurrency int
 	follow         bool
-	level          string
 	podName        string
 	previous       bool
 	timeline       bool
@@ -41,11 +39,6 @@ label selector.`,
 func init() {
 	rootCmd.AddCommand(logsCmd)
 	addLogFlags(logsCmd)
-
-	// Add completion for pod names
-	logsCmd.ValidArgsFunction = completePodNames
-	// Add completion for container names
-	_ = logsCmd.RegisterFlagCompletionFunc(flagContainer, completeContainerNames)
 }
 
 func addLogFlags(cmd *cobra.Command) {
@@ -60,6 +53,11 @@ func addLogFlags(cmd *cobra.Command) {
 	addLevelFlag(cmd)
 	addFilterFlags(cmd)
 	addLogQueryFlags(cmd)
+
+	// Pod-name and container-name completion apply to every command that takes
+	// these flags (both `logx logs` and the root `logx [pod]` shorthand).
+	cmd.ValidArgsFunction = completePodNames
+	_ = cmd.RegisterFlagCompletionFunc(flagContainer, completeContainerNames)
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -137,11 +135,6 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, err
 	}
 
-	level, err := effectiveLevel(cmd)
-	if err != nil {
-		return nil, err
-	}
-
 	previous, err := getBoolFlag(cmd, flagPrevious)
 	if err != nil {
 		return nil, err
@@ -165,7 +158,6 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		stats:          stats,
 		maxConcurrency: maxConcurrency,
 		follow:         follow,
-		level:          level,
 		podName:        podName,
 		previous:       previous,
 		timeline:       timeline,
@@ -182,9 +174,9 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if err := validateLogOptions(options); err != nil {
 		return err
 	}
-	filterLevel, err := logging.ParseLogLevel(options.level)
+	filterLevel, err := effectiveLogLevel(cmd)
 	if err != nil {
-		return fmt.Errorf("invalid level %q: %w", options.level, err)
+		return err
 	}
 
 	pipelineOptions, err := buildPipelineOptions(cmd, filterLevel)

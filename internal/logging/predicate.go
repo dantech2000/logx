@@ -141,18 +141,20 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 	return fp, nil
 }
 
-// operatorRunes are the characters that make up the comparison/match operators.
-// A field key composed solely of these is a parsing artifact, not a real name.
-const operatorRunes = "<>=!~"
+// PredicateOperatorChars are the characters that make up the --where
+// comparison/match operators. Exported so shell completion (cmd) can detect
+// when the user has moved past the field name without duplicating the set.
+const PredicateOperatorChars = "<>=!~"
 
 // isPureOperatorKey reports whether key is non-empty and made up entirely of
-// operator characters, e.g. ">" left over from parsing ">=5".
+// operator characters, e.g. ">" left over from parsing ">=5". Such a key is a
+// parsing artifact, not a real field name.
 func isPureOperatorKey(key string) bool {
 	if key == "" {
 		return false
 	}
 	for _, r := range key {
-		if !strings.ContainsRune(operatorRunes, r) {
+		if !strings.ContainsRune(PredicateOperatorChars, r) {
 			return false
 		}
 	}

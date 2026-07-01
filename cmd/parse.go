@@ -35,13 +35,9 @@ func init() {
 }
 
 func runParse(cmd *cobra.Command, args []string) error {
-	levelStr, err := effectiveLevel(cmd)
+	level, err := effectiveLogLevel(cmd)
 	if err != nil {
 		return err
-	}
-	level, err := logging.ParseLogLevel(levelStr)
-	if err != nil {
-		return fmt.Errorf("invalid level %q: %w", levelStr, err)
 	}
 
 	opts, err := buildPipelineOptions(cmd, level)

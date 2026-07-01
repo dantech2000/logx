@@ -6,8 +6,9 @@ import "regexp"
 // exactly one separating space. Unlike kubernetesTimestampPrefixRegex (which uses
 // \s+ and therefore swallows the payload's own leading whitespace), this matches
 // only the single separator, so the content's indentation is preserved for
-// continuation detection.
-var kubeletTimestampSepRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z `)
+// continuation detection. The timestamp core is shared via kubeletTimestampPattern
+// (parser.go).
+var kubeletTimestampSepRegex = regexp.MustCompile(`^` + kubeletTimestampPattern + ` `)
 
 // payloadIndented reports whether the log content carried by rawLine begins with
 // whitespace (a space or tab). It first removes an optional kubelet timestamp

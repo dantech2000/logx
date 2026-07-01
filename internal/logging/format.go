@@ -20,6 +20,11 @@ const (
 	highlightOff = "\x1b[27m"
 )
 
+// DisplayTimeLayout is the human-readable timestamp layout used consistently
+// across normal output, the --fields projection, --stats, and --timeline, so
+// the columns of the different views line up.
+const DisplayTimeLayout = "2006-01-02 15:04:05"
+
 // highlightMatches wraps every non-overlapping match of any pattern in s with
 // reverse-video so grep matches stand out. Overlapping match ranges from
 // different patterns are merged. It is a no-op when color is disabled, so plain
@@ -98,7 +103,7 @@ func FormatLogEntry(entry LogEntry) string {
 		// Normalize to UTC so timestamps are consistent regardless of the source
 		// format (RFC3339 parses to UTC, but epoch values parse to local time);
 		// this also matches the --timeline output.
-		b.WriteString(timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
+		b.WriteString(timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format(DisplayTimeLayout)))
 		b.WriteByte(' ')
 	}
 
@@ -178,7 +183,7 @@ func projectFieldValue(entry LogEntry, f projectedField) (string, bool) {
 	case fieldKindLogger:
 		return valueColor().Sprint(terminal.Sanitize(stringValue(raw))), true
 	case fieldKindTimestamp:
-		return timestampColor().Sprint(entry.Timestamp.UTC().Format("2006-01-02 15:04:05")), true
+		return timestampColor().Sprint(entry.Timestamp.UTC().Format(DisplayTimeLayout)), true
 	default:
 		return formatValue(raw), true
 	}
@@ -242,10 +247,8 @@ func formatPlainTextDetails(entry LogEntry) string {
 }
 
 func jsonMessage(entry LogEntry) string {
-	for _, field := range jsonMessageFields {
-		if val, ok := entry.Fields[field]; ok {
-			return terminal.Sanitize(fmt.Sprintf("%v", val))
-		}
+	if s, ok := firstStringField(entry.Fields, jsonMessageFields...); ok {
+		return terminal.Sanitize(s)
 	}
 	return ""
 }

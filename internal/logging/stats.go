@@ -144,9 +144,11 @@ func (s *Stats) Write(w io.Writer) error {
 	fmt.Fprintln(&b, quoteColor().Sprint("── logx stats ──"))
 	fmt.Fprintf(&b, "lines: %d", s.total)
 	if !s.firstTS.IsZero() {
+		// firstTS/lastTS were normalized to UTC by Record, matching the other
+		// DisplayTimeLayout renderings.
 		fmt.Fprintf(&b, "   span: %s → %s",
-			s.firstTS.Format("2006-01-02 15:04:05"),
-			s.lastTS.Format("2006-01-02 15:04:05"))
+			s.firstTS.Format(DisplayTimeLayout),
+			s.lastTS.Format(DisplayTimeLayout))
 	}
 	fmt.Fprintln(&b)
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +54,7 @@ func init() {
 // Static value enums offered for flag completion, kept in one place so the help
 // text, parser, and completion agree on what is valid.
 var (
-	levelCompletions  = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+	levelCompletions  = logging.LevelNames()
 	themeCompletions  = []string{"dark", "light"}
 	outputCompletions = []string{"text", "json"}
 	colorCompletions  = []string{"auto", "always", "never"}
@@ -114,16 +115,12 @@ func completeFieldList(_ *cobra.Command, _ []string, toComplete string) ([]strin
 // started typing an operator there is a value we cannot predict, so we stop
 // offering hints (and leave file completion off).
 func completeWhereField(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if strings.ContainsAny(toComplete, operatorChars) {
+	if strings.ContainsAny(toComplete, logging.PredicateOperatorChars) {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	// NoSpace so the user can append the operator (e.g. status>=500) without a gap.
 	return filterPrefix(knownFieldNames, toComplete), cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
 }
-
-// operatorChars mirrors the predicate operator characters; once any appears in a
-// --where token the user is past the field name.
-const operatorChars = "<>=!~"
 
 // splitLastComma splits s at its final comma into (everything up to and including
 // the comma, the trailing element). With no comma it returns ("", s).

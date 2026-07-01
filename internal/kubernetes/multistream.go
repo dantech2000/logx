@@ -19,9 +19,9 @@ import (
 // serialized so lines never interleave mid-line. It returns the first stream
 // error, if any, after all streams finish.
 func (lf *LogFetcher) GetAllContainerLogs(ctx context.Context) error {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
+	pod, err := lf.getPod(ctx)
 	if err != nil {
-		return fmt.Errorf("error fetching pod details: %w", err)
+		return err
 	}
 	names := podContainerNames(pod)
 	if len(names) == 0 {
@@ -181,26 +181,10 @@ func (lf *LogFetcher) effectiveMaxConcurrency(streamCount int) int {
 // the pipeline records into it instead of producing per-line output, so --stats
 // aggregates across every stream.
 func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *sync.Mutex, shared *logging.Stats) error {
-	opts := lf.podLogOptions(s.container)
-	req := lf.Clientset.CoreV1().Pods(s.namespace).GetLogs(s.pod, &opts)
-	stream, err := req.Stream(ctx)
-	if err != nil {
-		return fmt.Errorf("error opening log stream for %s/%s: %w", s.pod, s.container, err)
-	}
-	defer func() { _ = stream.Close() }()
-
 	pipeline := lf.newStreamPipeline(shared)
-	scanner := logging.NewLineReader(stream)
-	for scanner.Scan() {
-		out, ok := pipeline.ProcessLine(scanner.Text())
-		if !ok {
-			continue
-		}
-		if err := writeLine(mu, lf.Writer, s.prefix, out); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
+	return lf.streamLogs(ctx, s.namespace, s.pod, s.container, pipeline, func(line string) error {
+		return writeLine(mu, lf.Writer, s.prefix, line)
+	})
 }
 
 // writeLine writes "prefix + line + newline" as a single guarded write so
