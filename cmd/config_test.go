@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dantech2000/logx/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,59 @@ func writeConfig(t *testing.T, body string) string {
 	}
 	t.Setenv("LOGX_CONFIG", path)
 	return path
+}
+
+func TestConfigPathPrecedence(t *testing.T) {
+	// $LOGX_CONFIG wins outright.
+	t.Setenv("LOGX_CONFIG", "/explicit/config.yaml")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got := configPath(); got != "/explicit/config.yaml" {
+		t.Errorf("configPath() = %q, want $LOGX_CONFIG to win", got)
+	}
+
+	// Without it, $XDG_CONFIG_HOME/logx/config.yaml.
+	t.Setenv("LOGX_CONFIG", "")
+	if got, want := configPath(), filepath.Join("/xdg", "logx", "config.yaml"); got != want {
+		t.Errorf("configPath() = %q, want %q (from $XDG_CONFIG_HOME)", got, want)
+	}
+
+	// Without either, ~/.config/logx/config.yaml.
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory available: %v", err)
+	}
+	if got, want := configPath(), filepath.Join(home, ".config", "logx", "config.yaml"); got != want {
+		t.Errorf("configPath() = %q, want %q (home fallback)", got, want)
+	}
+}
+
+func TestApplyFieldAliasesRegistersConfigFields(t *testing.T) {
+	// Alias registration is deliberately global and additive (a startup-only
+	// operation with no unregister), so this test uses keys namespaced with a
+	// zz_cfg_ prefix that no other test input contains.
+	var cfg fileConfig
+	cfg.Fields.Level = []string{"zz_cfg_level"}
+	cfg.Fields.Message = []string{"zz_cfg_msg"}
+	cfg.applyFieldAliases()
+
+	entry := logging.ParseLogEntry(`{"zz_cfg_level":"error","zz_cfg_msg":"db down"}`)
+	if entry.Level != logging.ERROR || !entry.LevelDetected {
+		t.Errorf("config level alias not applied: level=%v detected=%v", entry.Level, entry.LevelDetected)
+	}
+	if entry.Message != "db down" {
+		t.Errorf("config message alias not applied: %q", entry.Message)
+	}
+}
+
+func TestApplyFieldAliasesEmptyConfigIsNoop(t *testing.T) {
+	var cfg fileConfig
+	cfg.applyFieldAliases() // no fields configured: must not disturb built-ins
+
+	entry := logging.ParseLogEntry(`{"level":"warn","msg":"disk almost full"}`)
+	if entry.Level != logging.WARN || entry.Message != "disk almost full" {
+		t.Errorf("built-in parsing disturbed: level=%v message=%q", entry.Level, entry.Message)
+	}
 }
 
 func TestLoadConfigValid(t *testing.T) {
