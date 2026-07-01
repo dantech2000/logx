@@ -1,10 +1,11 @@
 package logging
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/dantech2000/logx/internal/terminal"
@@ -40,7 +41,7 @@ func highlightMatches(s string, patterns []*regexp.Regexp) string {
 	if len(spans) == 0 {
 		return s
 	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	slices.SortFunc(spans, func(a, b span) int { return cmp.Compare(a.start, b.start) })
 
 	var b strings.Builder
 	cursor := 0
@@ -84,27 +85,33 @@ func quoteColor() *color.Color                  { return activeTheme.quote }
 func errorColor() *color.Color                  { return activeTheme.errorText }
 
 var jsonFormattedFieldExclusions = buildStringSet(jsonLevelFields, jsonTimeFields)
+var jsonMessageFieldSet = buildStringSet(jsonMessageFields)
 
 // FormatLogEntry renders a parsed log entry as a single colorized line with an
-// optional timestamp, level label, logger, and message/field details.
+// optional timestamp, level label, logger, and message/field details. Writes
+// directly to a builder instead of collecting a []string to strings.Join, since
+// this runs once per rendered line.
 func FormatLogEntry(entry LogEntry) string {
-	var parts []string
+	var b strings.Builder
 
 	if !entry.Timestamp.IsZero() {
 		// Normalize to UTC so timestamps are consistent regardless of the source
 		// format (RFC3339 parses to UTC, but epoch values parse to local time);
 		// this also matches the --timeline output.
-		parts = append(parts, timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
+		b.WriteString(timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
+		b.WriteByte(' ')
 	}
 
-	parts = append(parts, FormatLogLevelLabel(entry.Level))
+	b.WriteString(FormatLogLevelLabel(entry.Level))
 
 	if entry.Format == FormatJSON && entry.Logger != "" {
-		parts = append(parts, loggerColor().Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
+		b.WriteByte(' ')
+		b.WriteString(loggerColor().Sprintf("[%s]", terminal.Sanitize(entry.Logger)))
 	}
 
-	parts = append(parts, FormatLogEntryDetails(entry))
-	return strings.Join(parts, " ")
+	b.WriteByte(' ')
+	b.WriteString(FormatLogEntryDetails(entry))
+	return b.String()
 }
 
 // FormatLogLevelLabel returns the colorized bracketed label for a log level.
@@ -277,12 +284,7 @@ func formatSortedFields(fields map[string]interface{}) []string {
 }
 
 func isJSONMessageField(field string) bool {
-	for _, messageField := range jsonMessageFields {
-		if field == messageField {
-			return true
-		}
-	}
-	return false
+	return jsonMessageFieldSet[field]
 }
 
 func sortedKeys(data map[string]interface{}) []string {
@@ -290,7 +292,7 @@ func sortedKeys(data map[string]interface{}) []string {
 	for key := range data {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 

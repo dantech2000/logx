@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -25,6 +26,34 @@ func keyIn(key string, set []string) bool {
 		}
 	}
 	return false
+}
+
+// fieldKind classifies a predicate's key once (at parse time) into one of the
+// virtual field groups or a plain structured field, so Eval can dispatch with a
+// single comparison per line instead of re-scanning the virtual-key groups.
+type fieldKind int
+
+const (
+	fieldKindStructured fieldKind = iota
+	fieldKindLevel
+	fieldKindMessage
+	fieldKindLogger
+	fieldKindTimestamp
+)
+
+func classifyKey(key string) fieldKind {
+	switch {
+	case keyIn(key, levelKeys):
+		return fieldKindLevel
+	case keyIn(key, messageKeys):
+		return fieldKindMessage
+	case keyIn(key, loggerKeys):
+		return fieldKindLogger
+	case keyIn(key, tsKeys):
+		return fieldKindTimestamp
+	default:
+		return fieldKindStructured
+	}
 }
 
 type predicateOp int
@@ -67,6 +96,7 @@ type FieldPredicate struct {
 	num    float64
 	hasNum bool
 	re     *regexp.Regexp
+	kind   fieldKind
 }
 
 // ParseFieldPredicate parses an expression like "status>=500", "path~=/api", or
@@ -88,7 +118,7 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 		return FieldPredicate{}, fmt.Errorf("missing field name in %q (the field name reads as an operator; write field%svalue, e.g. status>=500)", expr, token)
 	}
 
-	fp := FieldPredicate{key: key, op: op, val: val}
+	fp := FieldPredicate{key: key, op: op, val: val, kind: classifyKey(key)}
 	switch op {
 	case opMatch:
 		re, err := regexp.Compile(val)
@@ -142,11 +172,11 @@ func leftmostOperator(expr string) (string, predicateOp, int) {
 
 // Eval reports whether entry satisfies the predicate.
 func (fp FieldPredicate) Eval(entry LogEntry) bool {
-	if keyIn(fp.key, levelKeys) {
+	if fp.kind == fieldKindLevel {
 		return fp.evalLevel(entry.Level)
 	}
 
-	raw, ok := resolveField(entry, fp.key)
+	raw, ok := fp.resolveValue(entry)
 	if !ok {
 		// A missing field is "not equal" to any value, and fails every other test.
 		return fp.op == opNeq
@@ -176,6 +206,28 @@ func (fp FieldPredicate) equals(str string) bool {
 	return str == fp.val
 }
 
+// compareOrdered evaluates a ==, !=, >, >=, <, or <= comparison between two
+// ordered values. Shared by compareNumeric (float64) and evalLevel (LogLevel)
+// so the operator switch exists in exactly one place instead of being repeated
+// per compared type.
+func compareOrdered[T cmp.Ordered](op predicateOp, a, b T) bool {
+	switch op {
+	case opEq:
+		return a == b
+	case opNeq:
+		return a != b
+	case opGt:
+		return a > b
+	case opGte:
+		return a >= b
+	case opLt:
+		return a < b
+	case opLte:
+		return a <= b
+	}
+	return false
+}
+
 // compareNumeric handles >, >=, <, <=. Both the field and the value must be
 // numeric; otherwise the predicate does not hold.
 func (fp FieldPredicate) compareNumeric(str string) bool {
@@ -186,17 +238,7 @@ func (fp FieldPredicate) compareNumeric(str string) bool {
 	if err != nil {
 		return false
 	}
-	switch fp.op {
-	case opGt:
-		return n > fp.num
-	case opGte:
-		return n >= fp.num
-	case opLt:
-		return n < fp.num
-	case opLte:
-		return n <= fp.num
-	}
-	return false
+	return compareOrdered(fp.op, n, fp.num)
 }
 
 // evalLevel compares against the entry's level by severity order, so
@@ -217,21 +259,7 @@ func (fp FieldPredicate) evalLevel(level LogLevel) bool {
 			return false
 		}
 	}
-	switch fp.op {
-	case opEq:
-		return level == want
-	case opNeq:
-		return level != want
-	case opGt:
-		return level > want
-	case opGte:
-		return level >= want
-	case opLt:
-		return level < want
-	case opLte:
-		return level <= want
-	}
-	return false
+	return compareOrdered(fp.op, level, want)
 }
 
 // resolveField returns the raw value for a key, handling the virtual keys
@@ -258,4 +286,31 @@ func resolveField(entry LogEntry, key string) (interface{}, bool) {
 		}
 	}
 	return nil, false
+}
+
+// resolveValue is resolveField's counterpart for a FieldPredicate: it dispatches
+// on the key's precomputed kind instead of re-scanning the virtual-key groups on
+// every call, which matters here since Eval runs once per predicate per log line.
+func (fp FieldPredicate) resolveValue(entry LogEntry) (interface{}, bool) {
+	switch fp.kind {
+	case fieldKindMessage:
+		if entry.Message != "" {
+			return entry.Message, true
+		}
+		return entry.RawLine, entry.RawLine != ""
+	case fieldKindLogger:
+		return entry.Logger, entry.Logger != ""
+	case fieldKindTimestamp:
+		if entry.Timestamp.IsZero() {
+			return nil, false
+		}
+		return entry.Timestamp.UTC().Format(time.RFC3339), true
+	default:
+		if entry.Fields != nil {
+			if v, ok := fieldValue(entry.Fields, fp.key); ok {
+				return v, true
+			}
+		}
+		return nil, false
+	}
 }
