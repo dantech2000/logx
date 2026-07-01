@@ -55,12 +55,11 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
 	cmd.Flags().Int(flagMaxConcurrency, 10, "Max container log streams read at once with --all-containers/--selector")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
-	cmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (DEBUG, INFO, WARN, ERROR)")
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
 	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
+	addLevelFlag(cmd)
 	addFilterFlags(cmd)
 	addLogQueryFlags(cmd)
-	registerLevelCompletion(cmd)
 }
 
 // completePodNames provides dynamic completion for pod names
@@ -178,6 +177,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Validate before any expensive work (kubeconfig load, client build) so an
+	// invalid flag combination reports the usage error, not a kubeconfig error.
+	if err := validateLogOptions(options); err != nil {
+		return err
+	}
 	filterLevel, err := logging.ParseLogLevel(options.level)
 	if err != nil {
 		return fmt.Errorf("invalid level %q: %w", options.level, err)
@@ -208,10 +212,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	logFetcher.AllNamespaces = options.allNamespaces
 	logFetcher.MaxConcurrency = options.maxConcurrency
 	if err := applyLogQuery(cmd, logFetcher); err != nil {
-		return err
-	}
-
-	if err := validateLogOptions(options); err != nil {
 		return err
 	}
 

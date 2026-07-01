@@ -149,7 +149,7 @@ func (lf *LogFetcher) previousContainerTerminated(pod *corev1.Pod, containerName
 			return status.RestartCount > 0, nil
 		}
 	}
-	return false, fmt.Errorf("container '%s' not found in pod '%s'", containerName, lf.PodName)
+	return false, fmt.Errorf("container %q not found in pod %q", containerName, lf.PodName)
 }
 
 // LogWriter is an io.Writer that feeds each written line through a shared

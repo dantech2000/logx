@@ -134,7 +134,7 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error
 	}
 
 	if !podHasContainer(pod, lf.ContainerName) {
-		return nil, fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
+		return nil, fmt.Errorf("container %q not found in pod %q", lf.ContainerName, lf.PodName)
 	}
 
 	if lf.Previous {
@@ -143,7 +143,7 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error
 			return nil, fmt.Errorf("failed to check for previous container: %w", err)
 		}
 		if !hasPrevious {
-			return nil, fmt.Errorf("no previous terminated container found for '%s' in pod '%s'\nNote: The -p flag only works for containers that have terminated or restarted",
+			return nil, fmt.Errorf("no previous terminated container found for %q in pod %q\nNote: The -p flag only works for containers that have terminated or restarted",
 				lf.ContainerName, lf.PodName)
 		}
 	}

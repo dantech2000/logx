@@ -30,9 +30,8 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(parseCmd)
-	parseCmd.Flags().StringP(flagLevel, "l", "DEBUG", "Filter logs by level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
+	addLevelFlag(parseCmd)
 	addFilterFlags(parseCmd)
-	registerLevelCompletion(parseCmd)
 }
 
 func runParse(cmd *cobra.Command, args []string) error {
