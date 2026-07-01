@@ -194,12 +194,12 @@ func TestFormatProjectedEntry(t *testing.T) {
 	ApplyColorMode(ColorNever)
 
 	entry := ParseLogEntry(`{"level":"error","msg":"db down","status":500,"time":"2026-06-24T10:00:00Z"}`)
-	out := FormatProjectedEntry(entry, []string{"level", "status", "msg", "missing"})
+	out := formatProjectedEntry(entry, classifyFields([]string{"level", "status", "msg", "missing"}))
 
 	// Requested keys appear in order; the missing key is omitted.
 	want := `level=ERROR status=500 msg="db down"`
 	if out != want {
-		t.Fatalf("FormatProjectedEntry = %q, want %q", out, want)
+		t.Fatalf("formatProjectedEntry = %q, want %q", out, want)
 	}
 }
 
@@ -207,8 +207,8 @@ func TestFormatProjectedEntryTimestampVirtualKey(t *testing.T) {
 	restoreColor(t)
 	ApplyColorMode(ColorNever)
 	entry := ParseLogEntry(`{"msg":"hi","ts":"2026-06-24T10:00:00Z"}`)
-	out := FormatProjectedEntry(entry, []string{"ts", "msg"})
+	out := formatProjectedEntry(entry, classifyFields([]string{"ts", "msg"}))
 	if out != `ts=2026-06-24 10:00:00 msg=hi` {
-		t.Fatalf("FormatProjectedEntry ts = %q", out)
+		t.Fatalf("formatProjectedEntry ts = %q", out)
 	}
 }

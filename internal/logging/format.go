@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -146,16 +145,10 @@ func ColorizePrefix(label string, idx int) string {
 	return prefixPalette[idx%len(prefixPalette)].Sprint(terminal.Sanitize(label))
 }
 
-// FormatProjectedEntry renders only the requested keys of an entry as
-// `key=value` pairs in the given order (the --fields projection). Virtual keys
-// (level, message, logger, timestamp) are supported alongside structured fields;
-// a missing key is omitted so output stays composable.
-func FormatProjectedEntry(entry LogEntry, fields []string) string {
-	return formatProjectedEntry(entry, classifyFields(fields))
-}
-
-// formatProjectedEntry is FormatProjectedEntry over pre-classified keys, the
-// form the pipeline uses so the virtual-key groups are not re-scanned per line.
+// formatProjectedEntry renders only the requested (pre-classified) keys of an
+// entry as `key=value` pairs in the given order (the --fields projection).
+// Virtual keys (level, message, logger, timestamp) are supported alongside
+// structured fields; a missing key is omitted so output stays composable.
 func formatProjectedEntry(entry LogEntry, fields []projectedField) string {
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
@@ -169,10 +162,18 @@ func formatProjectedEntry(entry LogEntry, fields []projectedField) string {
 }
 
 // projectFieldValue returns the formatted value for a projection key, or false
-// when the entry has nothing for it.
+// when the entry has nothing for it. Level and timestamp render from the
+// entry's typed fields directly (colorized name, display layout); the rest
+// resolve through resolveByKind like the predicate engine.
 func projectFieldValue(entry LogEntry, f projectedField) (string, bool) {
-	if f.kind == fieldKindLevel {
+	switch f.kind {
+	case fieldKindLevel:
 		return levelColorFor(entry.Level).Sprint(entry.Level.String()), true
+	case fieldKindTimestamp:
+		if entry.Timestamp.IsZero() {
+			return "", false
+		}
+		return timestampColor().Sprint(entry.Timestamp.UTC().Format(DisplayTimeLayout)), true
 	}
 	raw, ok := resolveByKind(entry, f.kind, f.key)
 	if !ok {
@@ -183,8 +184,6 @@ func projectFieldValue(entry LogEntry, f projectedField) (string, bool) {
 		return formatStringValue(stringValue(raw)), true
 	case fieldKindLogger:
 		return valueColor().Sprint(terminal.Sanitize(stringValue(raw))), true
-	case fieldKindTimestamp:
-		return timestampColor().Sprint(entry.Timestamp.UTC().Format(DisplayTimeLayout)), true
 	default:
 		return formatValue(raw), true
 	}
@@ -285,8 +284,15 @@ func isJSONMessageField(field string) bool {
 	return jsonMessageFieldSet[field]
 }
 
+// sortedKeys deliberately avoids slices.Sorted(maps.Keys(...)): the iterator
+// form cannot pre-size from the map length, and this runs per rendered line.
 func sortedKeys(data map[string]any) []string {
-	return slices.Sorted(maps.Keys(data))
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func formatValue(v any) string {

@@ -23,7 +23,7 @@ func Sanitize(value string) string {
 	start := 0
 	for start < len(value) {
 		r, size := utf8.DecodeRuneInString(value[start:])
-		if (r == utf8.RuneError && size == 1) || (r != '\t' && isUnsafeRune(r)) {
+		if needsEscape(r, size) {
 			break
 		}
 		start += size
@@ -38,26 +38,35 @@ func Sanitize(value string) string {
 
 	for i := start; i < len(value); {
 		r, size := utf8.DecodeRuneInString(value[i:])
-		if r == utf8.RuneError && size == 1 {
-			// Invalid UTF-8 byte: escape the raw byte and move on.
-			fmt.Fprintf(&builder, `\x%02X`, value[i])
-			i++
-			continue
-		}
-		if r != '\t' && isUnsafeRune(r) {
-			if r <= 0xff {
-				fmt.Fprintf(&builder, `\x%02X`, r)
-			} else {
-				fmt.Fprintf(&builder, `\u%04X`, r)
-			}
+		if !needsEscape(r, size) {
+			builder.WriteRune(r)
 			i += size
 			continue
 		}
-		builder.WriteRune(r)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			// Invalid UTF-8 byte: escape the raw byte itself.
+			fmt.Fprintf(&builder, `\x%02X`, value[i])
+		case r <= 0xff:
+			fmt.Fprintf(&builder, `\x%02X`, r)
+		default:
+			fmt.Fprintf(&builder, `\u%04X`, r)
+		}
 		i += size
 	}
 
 	return builder.String()
+}
+
+// needsEscape reports whether the rune decoded at the current position must be
+// escaped: an invalid UTF-8 byte (RuneError with size 1) or an unsafe rune,
+// with tab exempted. The single predicate shared by Sanitize's fast-path scan
+// and its escape loop, so the two can never drift.
+func needsEscape(r rune, size int) bool {
+	if r == utf8.RuneError && size == 1 {
+		return true
+	}
+	return r != '\t' && isUnsafeRune(r)
 }
 
 // isUnsafeRune reports whether r should be escaped before printing to a terminal.

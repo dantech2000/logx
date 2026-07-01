@@ -178,8 +178,14 @@ func TestGetLogsRejectsUnknownContainer(t *testing.T) {
 	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
 	fetcher.ContainerName = "nope"
 
-	if err := fetcher.GetLogs(context.Background()); err == nil {
+	err := fetcher.GetLogs(context.Background())
+	if err == nil {
 		t.Fatal("GetLogs() with unknown container = nil error, want error")
+	}
+	// %q quoting pins that untrusted container/pod names are escaped in the
+	// error text rather than interpolated raw.
+	if !strings.Contains(err.Error(), `container "nope" not found in pod "p"`) {
+		t.Fatalf("GetLogs() error = %v, want %%q-quoted container/pod names", err)
 	}
 }
 

@@ -62,9 +62,9 @@ func TestMarshalEntryJSONEscapesControlBytes(t *testing.T) {
 }
 
 func TestMarshalProjectedJSON(t *testing.T) {
-	out := MarshalProjectedJSON(
+	out := marshalProjectedJSON(
 		ParseLogEntry(`{"level":"warn","status":404,"path":"/x","msg":"nope"}`),
-		[]string{"level", "status", "missing"},
+		classifyFields([]string{"level", "status", "missing"}),
 	)
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(out), &obj); err != nil {

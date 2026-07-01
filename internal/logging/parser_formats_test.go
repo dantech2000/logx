@@ -106,3 +106,31 @@ func TestNewFormatsDoNotMisclassifyProse(t *testing.T) {
 		})
 	}
 }
+
+// TestYAMLFlowStatusFieldLevel pins that a YAML flow-map access log — whose
+// status value parses as a Go int, unlike JSON's float64 — classifies by HTTP
+// status exactly like the equivalent JSON line (5xx→ERROR, 4xx→WARN, 2xx→DEBUG
+// per statusClassLevel). This alignment arrived when parseHTTPStatusLevel
+// started coercing through toInt, which accepts int.
+func TestYAMLFlowStatusFieldLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLevel LogLevel
+	}{
+		{"server error", `{status: 500, method: GET, path: /api, msg: upstream failed}`, ERROR},
+		{"client error", `{status: 404, method: GET, path: /missing, msg: not found}`, WARN},
+		{"success stays at DEBUG", `{status: 200, method: GET, path: /healthz, msg: ok}`, DEBUG},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseLogEntry(tt.input)
+			if got.Level != tt.wantLevel {
+				t.Errorf("Level = %v, want %v", got.Level, tt.wantLevel)
+			}
+			if !got.LevelDetected {
+				t.Error("LevelDetected = false, want true (level derived from HTTP status)")
+			}
+		})
+	}
+}

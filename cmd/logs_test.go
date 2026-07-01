@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dantech2000/logx/internal/logging"
@@ -147,5 +148,23 @@ func TestValidateLogOptionsAllNamespaces(t *testing.T) {
 	}
 	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api", maxConcurrency: 10}); err != nil {
 		t.Fatalf("--all-namespaces with --selector should be valid, got %v", err)
+	}
+}
+
+// TestLevelFlagHelpListsAllLevels pins that the shared --level help text names
+// every level the parser accepts, guarding against the drift this flag once had
+// (the logs help listed only four of the six levels).
+func TestLevelFlagHelpListsAllLevels(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	addLevelFlag(cmd)
+
+	flag := cmd.Flags().Lookup(flagLevel)
+	if flag == nil {
+		t.Fatal("--level flag not registered")
+	}
+	for _, name := range logging.LevelNames() {
+		if !strings.Contains(flag.Usage, name) {
+			t.Errorf("--level help %q missing level %s", flag.Usage, name)
+		}
 	}
 }

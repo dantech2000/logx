@@ -140,16 +140,11 @@ func registerFilterFlagCompletions(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc(flagWhere, completeWhereField)
 }
 
-// registerLevelCompletion wires --level value completion on cmd.
-func registerLevelCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc(flagLevel, staticFlagCompletion(levelCompletions...))
-}
-
 // addLevelFlag registers the shared --level flag plus its value completion. One
 // definition so `logs` and `parse` agree on the help text and the level list
 // stays in sync with levelCompletions.
 func addLevelFlag(cmd *cobra.Command) {
 	cmd.Flags().StringP(flagLevel, "l", "DEBUG",
 		"Filter logs by level ("+strings.Join(levelCompletions, ", ")+")")
-	registerLevelCompletion(cmd)
+	_ = cmd.RegisterFlagCompletionFunc(flagLevel, staticFlagCompletion(levelCompletions...))
 }

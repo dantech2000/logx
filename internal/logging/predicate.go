@@ -268,13 +268,14 @@ func (fp FieldPredicate) evalLevel(level LogLevel) bool {
 }
 
 // resolveByKind returns the raw value for a key already classified into a
-// fieldKind, handling the virtual keys (message/logger/timestamp) before
-// falling back to a structured field (dot-path aware). Level keys are not
-// resolved here: the predicate engine compares levels by severity and the
-// projections render them specially, so a level kind falls through to the
-// structured-field lookup like any other plain key.
+// fieldKind, handling the virtual keys (level/message/logger/timestamp) before
+// falling back to a structured field (dot-path aware). A level kind resolves to
+// the parsed level's name; the predicate engine never asks for it (Eval routes
+// level keys to evalLevel for severity-ordered comparison first).
 func resolveByKind(entry LogEntry, kind fieldKind, key string) (any, bool) {
 	switch kind {
+	case fieldKindLevel:
+		return entry.Level.String(), true
 	case fieldKindMessage:
 		if entry.Message != "" {
 			return entry.Message, true

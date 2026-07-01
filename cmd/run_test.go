@@ -189,3 +189,22 @@ func TestRunLogsRejectsInvalidLevel(t *testing.T) {
 		t.Fatal("runLogs() error = nil, want error for invalid level")
 	}
 }
+
+// TestRunLogsValidatesFlagsBeforeClientBuild pins that an invalid flag
+// combination reports the usage error without touching the kubeconfig/client
+// path, so a broken kube environment can't mask the real problem.
+func TestRunLogsValidatesFlagsBeforeClientBuild(t *testing.T) {
+	withClientFactory(t, func(kubernetes.ClientOptions) (k8skubernetes.Interface, string, error) {
+		t.Error("client factory should not be called when flag validation fails")
+		return nil, "", nil
+	})
+
+	var buf bytes.Buffer
+	err := executeLogs(&buf, "test-pod", "--timeline", "--follow")
+	if err == nil {
+		t.Fatal("runLogs() error = nil, want flag-combination error")
+	}
+	if !strings.Contains(err.Error(), "--timeline cannot be used with --follow") {
+		t.Fatalf("runLogs() error = %v, want the --timeline/--follow usage error", err)
+	}
+}

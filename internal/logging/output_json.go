@@ -69,18 +69,12 @@ func MarshalEntryJSON(entry LogEntry) string {
 	return marshalLine(out)
 }
 
-// MarshalProjectedJSON renders only the requested keys as a flat JSON object,
-// the JSON counterpart of the --fields projection.
-func MarshalProjectedJSON(entry LogEntry, fields []string) string {
-	return marshalProjectedJSON(entry, classifyFields(fields))
-}
-
-// marshalProjectedJSON is MarshalProjectedJSON over pre-classified keys, the
-// form the pipeline uses so the virtual-key groups are not re-scanned per line.
+// marshalProjectedJSON renders only the requested (pre-classified) keys as a
+// flat JSON object, the JSON counterpart of the --fields projection.
 func marshalProjectedJSON(entry LogEntry, fields []projectedField) string {
 	obj := make(map[string]any, len(fields))
 	for _, f := range fields {
-		if v, ok := projectRawValue(entry, f); ok {
+		if v, ok := resolveByKind(entry, f.kind, f.key); ok {
 			obj[f.key] = v
 		}
 	}
@@ -104,15 +98,6 @@ func extraFields(fields map[string]any) map[string]any {
 		return nil
 	}
 	return out
-}
-
-// projectRawValue returns the raw value for a projection key, handling the level
-// virtual key (which resolveByKind leaves to the predicate engine).
-func projectRawValue(entry LogEntry, f projectedField) (any, bool) {
-	if f.kind == fieldKindLevel {
-		return entry.Level.String(), true
-	}
-	return resolveByKind(entry, f.kind, f.key)
 }
 
 func marshalLine(v any) string {
