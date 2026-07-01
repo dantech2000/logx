@@ -17,26 +17,34 @@ import (
 // `range` operator alone would silently turn such bytes into U+FFFD and could
 // leave the raw byte in the output via the unchanged fast path.
 func Sanitize(value string) string {
+	// Fast path: find the first byte/rune that needs escaping. Most values are
+	// clean and return unchanged without touching a builder — this runs many
+	// times per rendered line, so the zero-allocation path matters.
+	start := 0
+	for start < len(value) {
+		r, size := utf8.DecodeRuneInString(value[start:])
+		if (r == utf8.RuneError && size == 1) || (r != '\t' && isUnsafeRune(r)) {
+			break
+		}
+		start += size
+	}
+	if start == len(value) {
+		return value
+	}
+
 	var builder strings.Builder
 	builder.Grow(len(value))
-	changed := false
+	builder.WriteString(value[:start])
 
-	for i := 0; i < len(value); {
+	for i := start; i < len(value); {
 		r, size := utf8.DecodeRuneInString(value[i:])
 		if r == utf8.RuneError && size == 1 {
 			// Invalid UTF-8 byte: escape the raw byte and move on.
-			changed = true
 			fmt.Fprintf(&builder, `\x%02X`, value[i])
 			i++
 			continue
 		}
-		if r == '\t' {
-			builder.WriteRune(r)
-			i += size
-			continue
-		}
-		if isUnsafeRune(r) {
-			changed = true
+		if r != '\t' && isUnsafeRune(r) {
 			if r <= 0xff {
 				fmt.Fprintf(&builder, `\x%02X`, r)
 			} else {
@@ -49,9 +57,6 @@ func Sanitize(value string) string {
 		i += size
 	}
 
-	if !changed {
-		return value
-	}
 	return builder.String()
 }
 

@@ -613,14 +613,23 @@ func stripPrefixToken(s, tok string) string {
 }
 
 func splitTrailingFields(message string) (string, map[string]interface{}) {
+	// Fast path: without a '=' there can be no key=value fields, so skip the
+	// tokenization (this runs for every bracketed line).
+	if !strings.Contains(message, "=") {
+		return strings.TrimSpace(message), nil
+	}
+
 	parts := strings.Fields(message)
-	fields := make(map[string]interface{})
+	var fields map[string]interface{}
 	fieldStart := len(parts)
 
 	for i := len(parts) - 1; i >= 0; i-- {
 		key, value, ok := simpleField(parts[i])
 		if !ok {
 			break
+		}
+		if fields == nil {
+			fields = make(map[string]interface{})
 		}
 		fields[key] = strings.Trim(value, `"`)
 		fieldStart = i
@@ -705,10 +714,20 @@ func parseLogfmtFields(line string) (map[string]interface{}, bool) {
 func firstStringField(fields map[string]interface{}, names ...string) (string, bool) {
 	for _, name := range names {
 		if value, ok := fields[name]; ok {
-			return fmt.Sprintf("%v", value), true
+			return stringValue(value), true
 		}
 	}
 	return "", false
+}
+
+// stringValue returns v's string form, skipping the fmt machinery for the
+// common case where the value already is a string (logfmt and XML parsers only
+// ever produce string values; JSON messages usually are strings too).
+func stringValue(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 func firstField(fields map[string]interface{}, names ...string) (interface{}, bool) {
@@ -724,9 +743,17 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 	if value, ok := fields[name]; ok {
 		return value, true
 	}
+	// Only a dotted name can still resolve, as a path into nested maps. This
+	// runs on every probe of a missing key (level/message/time candidates,
+	// --where, --fields), so avoid any allocation on the miss path.
+	if !strings.Contains(name, ".") {
+		return nil, false
+	}
 
 	current := interface{}(fields)
-	for _, part := range strings.Split(name, ".") {
+	rest := name
+	for {
+		part, remainder, more := strings.Cut(rest, ".")
 		currentFields, ok := current.(map[string]interface{})
 		if !ok {
 			return nil, false
@@ -736,8 +763,11 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 			return nil, false
 		}
 		current = value
+		if !more {
+			return current, true
+		}
+		rest = remainder
 	}
-	return current, true
 }
 
 // ParseLogEntry parses a single log line, trying each known format parser in

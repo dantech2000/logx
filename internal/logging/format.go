@@ -116,7 +116,7 @@ func FormatLogEntry(entry LogEntry) string {
 
 // FormatLogLevelLabel returns the colorized bracketed label for a log level.
 func FormatLogLevelLabel(level LogLevel) string {
-	return levelColorFor(level).Sprint(fmt.Sprintf("[%s]", level))
+	return levelColorFor(level).Sprintf("[%s]", level)
 }
 
 // prefixPalette colors stream labels (container/pod names) in merged output. The
@@ -145,49 +145,43 @@ func ColorizePrefix(label string, idx int) string {
 // (level, message, logger, timestamp) are supported alongside structured fields;
 // a missing key is omitted so output stays composable.
 func FormatProjectedEntry(entry LogEntry, fields []string) string {
+	return formatProjectedEntry(entry, classifyFields(fields))
+}
+
+// formatProjectedEntry is FormatProjectedEntry over pre-classified keys, the
+// form the pipeline uses so the virtual-key groups are not re-scanned per line.
+func formatProjectedEntry(entry LogEntry, fields []projectedField) string {
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
 		val, ok := projectFieldValue(entry, f)
 		if !ok {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f)), val))
+		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f.key)), val))
 	}
 	return strings.Join(parts, " ")
 }
 
 // projectFieldValue returns the formatted value for a projection key, or false
 // when the entry has nothing for it.
-func projectFieldValue(entry LogEntry, key string) (string, bool) {
-	switch {
-	case keyIn(key, levelKeys):
+func projectFieldValue(entry LogEntry, f projectedField) (string, bool) {
+	if f.kind == fieldKindLevel {
 		return levelColorFor(entry.Level).Sprint(entry.Level.String()), true
-	case keyIn(key, messageKeys):
-		msg := entry.Message
-		if msg == "" {
-			msg = entry.RawLine
-		}
-		if msg == "" {
-			return "", false
-		}
-		return formatStringValue(msg), true
-	case keyIn(key, loggerKeys):
-		if entry.Logger == "" {
-			return "", false
-		}
-		return valueColor().Sprint(terminal.Sanitize(entry.Logger)), true
-	case keyIn(key, tsKeys):
-		if entry.Timestamp.IsZero() {
-			return "", false
-		}
+	}
+	raw, ok := resolveByKind(entry, f.kind, f.key)
+	if !ok {
+		return "", false
+	}
+	switch f.kind {
+	case fieldKindMessage:
+		return formatStringValue(stringValue(raw)), true
+	case fieldKindLogger:
+		return valueColor().Sprint(terminal.Sanitize(stringValue(raw))), true
+	case fieldKindTimestamp:
 		return timestampColor().Sprint(entry.Timestamp.UTC().Format("2006-01-02 15:04:05")), true
+	default:
+		return formatValue(raw), true
 	}
-	if entry.Fields != nil {
-		if v, ok := fieldValue(entry.Fields, key); ok {
-			return formatValue(v), true
-		}
-	}
-	return "", false
 }
 
 // FormatLogEntryDetails renders the message and structured fields of an entry,
