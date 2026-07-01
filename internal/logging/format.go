@@ -20,6 +20,11 @@ const (
 	highlightOff = "\x1b[27m"
 )
 
+// DisplayTimeLayout is the human-readable timestamp layout used consistently
+// across normal output, the --fields projection, --stats, and --timeline, so
+// the columns of the different views line up.
+const DisplayTimeLayout = "2006-01-02 15:04:05"
+
 // highlightMatches wraps every non-overlapping match of any pattern in s with
 // reverse-video so grep matches stand out. Overlapping match ranges from
 // different patterns are merged. It is a no-op when color is disabled, so plain
@@ -98,7 +103,7 @@ func FormatLogEntry(entry LogEntry) string {
 		// Normalize to UTC so timestamps are consistent regardless of the source
 		// format (RFC3339 parses to UTC, but epoch values parse to local time);
 		// this also matches the --timeline output.
-		b.WriteString(timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format("2006-01-02 15:04:05")))
+		b.WriteString(timestampColor().Sprintf("[%s]", entry.Timestamp.UTC().Format(DisplayTimeLayout)))
 		b.WriteByte(' ')
 	}
 
@@ -116,7 +121,7 @@ func FormatLogEntry(entry LogEntry) string {
 
 // FormatLogLevelLabel returns the colorized bracketed label for a log level.
 func FormatLogLevelLabel(level LogLevel) string {
-	return levelColorFor(level).Sprint(fmt.Sprintf("[%s]", level))
+	return levelColorFor(level).Sprintf("[%s]", level)
 }
 
 // prefixPalette colors stream labels (container/pod names) in merged output. The
@@ -140,54 +145,48 @@ func ColorizePrefix(label string, idx int) string {
 	return prefixPalette[idx%len(prefixPalette)].Sprint(terminal.Sanitize(label))
 }
 
-// FormatProjectedEntry renders only the requested keys of an entry as
-// `key=value` pairs in the given order (the --fields projection). Virtual keys
-// (level, message, logger, timestamp) are supported alongside structured fields;
-// a missing key is omitted so output stays composable.
-func FormatProjectedEntry(entry LogEntry, fields []string) string {
+// formatProjectedEntry renders only the requested (pre-classified) keys of an
+// entry as `key=value` pairs in the given order (the --fields projection).
+// Virtual keys (level, message, logger, timestamp) are supported alongside
+// structured fields; a missing key is omitted so output stays composable.
+func formatProjectedEntry(entry LogEntry, fields []projectedField) string {
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
 		val, ok := projectFieldValue(entry, f)
 		if !ok {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f)), val))
+		parts = append(parts, fmt.Sprintf("%s=%s", keyColor().Sprint(terminal.Sanitize(f.key)), val))
 	}
 	return strings.Join(parts, " ")
 }
 
 // projectFieldValue returns the formatted value for a projection key, or false
-// when the entry has nothing for it.
-func projectFieldValue(entry LogEntry, key string) (string, bool) {
-	switch {
-	case keyIn(key, levelKeys):
+// when the entry has nothing for it. Level and timestamp render from the
+// entry's typed fields directly (colorized name, display layout); the rest
+// resolve through resolveByKind like the predicate engine.
+func projectFieldValue(entry LogEntry, f projectedField) (string, bool) {
+	switch f.kind {
+	case fieldKindLevel:
 		return levelColorFor(entry.Level).Sprint(entry.Level.String()), true
-	case keyIn(key, messageKeys):
-		msg := entry.Message
-		if msg == "" {
-			msg = entry.RawLine
-		}
-		if msg == "" {
-			return "", false
-		}
-		return formatStringValue(msg), true
-	case keyIn(key, loggerKeys):
-		if entry.Logger == "" {
-			return "", false
-		}
-		return valueColor().Sprint(terminal.Sanitize(entry.Logger)), true
-	case keyIn(key, tsKeys):
+	case fieldKindTimestamp:
 		if entry.Timestamp.IsZero() {
 			return "", false
 		}
-		return timestampColor().Sprint(entry.Timestamp.UTC().Format("2006-01-02 15:04:05")), true
+		return timestampColor().Sprint(entry.Timestamp.UTC().Format(DisplayTimeLayout)), true
 	}
-	if entry.Fields != nil {
-		if v, ok := fieldValue(entry.Fields, key); ok {
-			return formatValue(v), true
-		}
+	raw, ok := resolveByKind(entry, f.kind, f.key)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	switch f.kind {
+	case fieldKindMessage:
+		return formatStringValue(stringValue(raw)), true
+	case fieldKindLogger:
+		return valueColor().Sprint(terminal.Sanitize(stringValue(raw))), true
+	default:
+		return formatValue(raw), true
+	}
 }
 
 // FormatLogEntryDetails renders the message and structured fields of an entry,
@@ -248,10 +247,8 @@ func formatPlainTextDetails(entry LogEntry) string {
 }
 
 func jsonMessage(entry LogEntry) string {
-	for _, field := range jsonMessageFields {
-		if val, ok := entry.Fields[field]; ok {
-			return terminal.Sanitize(fmt.Sprintf("%v", val))
-		}
+	if s, ok := firstStringField(entry.Fields, jsonMessageFields...); ok {
+		return terminal.Sanitize(s)
 	}
 	return ""
 }
@@ -270,7 +267,7 @@ func containsAttentionText(value string) bool {
 		strings.Contains(lowerValue, "warn")
 }
 
-func formatSortedFields(fields map[string]interface{}) []string {
+func formatSortedFields(fields map[string]any) []string {
 	formattedFields := make([]string, 0, len(fields))
 	for _, key := range sortedKeys(fields) {
 		if jsonFormattedFieldExclusions[key] || isJSONMessageField(key) {
@@ -287,7 +284,9 @@ func isJSONMessageField(field string) bool {
 	return jsonMessageFieldSet[field]
 }
 
-func sortedKeys(data map[string]interface{}) []string {
+// sortedKeys deliberately avoids slices.Sorted(maps.Keys(...)): the iterator
+// form cannot pre-size from the map length, and this runs per rendered line.
+func sortedKeys(data map[string]any) []string {
 	keys := make([]string, 0, len(data))
 	for key := range data {
 		keys = append(keys, key)
@@ -296,7 +295,7 @@ func sortedKeys(data map[string]interface{}) []string {
 	return keys
 }
 
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return formatStringValue(val)
@@ -318,7 +317,7 @@ func formatValue(v interface{}) string {
 		return formatJSONNumber(val)
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return valueColor().Sprintf("%d", val)
-	case map[string]interface{}:
+	case map[string]any:
 		parts := make([]string, 0, len(val))
 		for _, key := range sortedKeys(val) {
 			parts = append(parts, fmt.Sprintf("%s=%s",
@@ -326,7 +325,7 @@ func formatValue(v interface{}) string {
 				formatValue(val[key])))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(parts, " "))
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(val))
 		for _, item := range val {
 			parts = append(parts, formatValue(item))

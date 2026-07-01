@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -77,17 +78,31 @@ func (c fileConfig) applyFieldAliases() {
 // stringDefault returns the config value when the flag was not explicitly set
 // and the config provides one, implementing flag > config > built-in precedence.
 func stringDefault(flagValue, configValue string, changed bool) string {
-	if !changed && configValue != "" {
-		return configValue
+	if changed {
+		return flagValue
 	}
-	return flagValue
+	return cmp.Or(configValue, flagValue)
 }
 
 // effectiveLevel resolves the level string with flag > config > built-in default.
 func effectiveLevel(cmd *cobra.Command) (string, error) {
-	level, err := cmd.Flags().GetString(flagLevel)
+	level, err := getStringFlag(cmd, flagLevel)
 	if err != nil {
-		return "", fmt.Errorf("error getting level flag: %w", err)
+		return "", err
 	}
 	return stringDefault(level, loadedConfig.Level, cmd.Flags().Changed(flagLevel)), nil
+}
+
+// effectiveLogLevel resolves and parses the --level value in one step, so the
+// commands that share the flag also share the resolution and error wording.
+func effectiveLogLevel(cmd *cobra.Command) (logging.LogLevel, error) {
+	levelStr, err := effectiveLevel(cmd)
+	if err != nil {
+		return logging.DEBUG, err
+	}
+	level, err := logging.ParseLogLevel(levelStr)
+	if err != nil {
+		return logging.DEBUG, fmt.Errorf("invalid level %q: %w", levelStr, err)
+	}
+	return level, nil
 }

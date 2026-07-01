@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ type LogEntry struct {
 	Message   string
 	Format    LogFormat
 	Logger    string
-	Fields    map[string]interface{}
+	Fields    map[string]any
 	Timestamp time.Time
 	RawLine   string // Original payload used as fallback display text.
 	// LevelDetected reports whether Level came from the line itself (an explicit
@@ -114,8 +115,14 @@ var logParsers = []logParser{
 	csvLogParser{},
 }
 
+// kubeletTimestampPattern is the RFC3339 shape of a kubelet --timestamps prefix.
+// It is the shared core of kubernetesTimestampPrefixRegex (below) and
+// kubeletTimestampSepRegex (continuation.go) so the two cannot drift; they
+// intentionally differ only in the separator they consume.
+const kubeletTimestampPattern = `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z`
+
 var (
-	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s+(.*)$`)
+	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(` + kubeletTimestampPattern + `)\s+(.*)$`)
 	plainTextTimestampRegex        = regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
 	plainTextLevelRegex            = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)([^[:alnum:]_]|$)`)
 	// logfmtKeyRegex matches identifier-like logfmt keys so that tokens such as a
@@ -160,7 +167,7 @@ func (jsonLogParser) Parse(line string) (LogEntry, bool) {
 		return LogEntry{}, false
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	decoder := json.NewDecoder(strings.NewReader(trimmedLine))
 	decoder.UseNumber()
 	if err := decoder.Decode(&data); err != nil {
@@ -348,7 +355,7 @@ func klogLevel(letter string) LogLevel {
 }
 
 // detectLoggerLabel returns a display label for known structured logging formats.
-func detectLoggerLabel(data map[string]interface{}) string {
+func detectLoggerLabel(data map[string]any) string {
 	switch {
 	case data["caller"] != nil && data["ts"] != nil:
 		return "zap"
@@ -379,7 +386,7 @@ func parseTimestamp(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeStr)
 }
 
-func parseJSONLog(line string, data map[string]interface{}) LogEntry {
+func parseJSONLog(line string, data map[string]any) LogEntry {
 	logger := detectLoggerLabel(data)
 	entry := LogEntry{
 		Format:  FormatJSON,
@@ -397,11 +404,10 @@ func parseJSONLog(line string, data map[string]interface{}) LogEntry {
 // parseJSONLevel resolves the level from a JSON log object and reports whether a
 // level was actually found (via a level field or HTTP status) rather than
 // defaulted to DEBUG.
-func parseJSONLevel(data map[string]interface{}) (LogLevel, bool) {
+func parseJSONLevel(data map[string]any) (LogLevel, bool) {
 	for _, field := range jsonLevelFields {
 		if val, ok := fieldValue(data, field); ok {
-			levelStr := fmt.Sprintf("%v", val)
-			if level, err := ParseLogLevel(levelStr); err == nil {
+			if level, err := ParseLogLevel(stringValue(val)); err == nil {
 				return level, true
 			}
 		}
@@ -412,20 +418,20 @@ func parseJSONLevel(data map[string]interface{}) (LogLevel, bool) {
 	return DEBUG, false
 }
 
-func parseJSONMessage(line string, data map[string]interface{}) string {
+func parseJSONMessage(line string, data map[string]any) string {
 	for _, field := range jsonMessageFields {
 		if val, ok := fieldValue(data, field); ok {
-			return fmt.Sprintf("%v", val)
+			return stringValue(val)
 		}
 	}
 
 	if err, ok := data["error"]; ok {
-		return fmt.Sprintf("%v", err)
+		return stringValue(err)
 	}
 	return line
 }
 
-func parseJSONTimestamp(data map[string]interface{}) time.Time {
+func parseJSONTimestamp(data map[string]any) time.Time {
 	for _, field := range jsonTimeFields {
 		if val, ok := fieldValue(data, field); ok {
 			if numTime, ok := val.(float64); ok {
@@ -478,7 +484,7 @@ func parseUnixTimestampString(value string) (time.Time, bool) {
 	return parseUnixTimestamp(timestamp), true
 }
 
-func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
+func parseHTTPStatusLevel(data map[string]any) (LogLevel, bool) {
 	if !hasHTTPContext(data) {
 		return DEBUG, false
 	}
@@ -488,23 +494,8 @@ func parseHTTPStatusLevel(data map[string]interface{}) (LogLevel, bool) {
 		return DEBUG, false
 	}
 
-	var status int
-	switch value := statusValue.(type) {
-	case float64:
-		status = int(value)
-	case json.Number:
-		parsedStatus, err := strconv.Atoi(value.String())
-		if err != nil {
-			return DEBUG, false
-		}
-		status = parsedStatus
-	case string:
-		parsedStatus, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil {
-			return DEBUG, false
-		}
-		status = parsedStatus
-	default:
+	status, ok := toInt(statusValue)
+	if !ok {
 		return DEBUG, false
 	}
 
@@ -529,14 +520,14 @@ func statusClassLevel(status int) (LogLevel, bool) {
 	}
 }
 
-func hasHTTPContext(data map[string]interface{}) bool {
+func hasHTTPContext(data map[string]any) bool {
 	return hasAnyField(data, httpContextFields)
 }
 
 // hasAnyField reports whether data has a value for any of keys, dot-path aware
 // (e.g. "request.method" walks into a nested map). Shared by hasHTTPContext and
 // the XML/CSV format detectors so both use the same field-presence semantics.
-func hasAnyField(data map[string]interface{}, keys []string) bool {
+func hasAnyField(data map[string]any, keys []string) bool {
 	for _, key := range keys {
 		if _, ok := fieldValue(data, key); ok {
 			return true
@@ -612,15 +603,24 @@ func stripPrefixToken(s, tok string) string {
 	return s
 }
 
-func splitTrailingFields(message string) (string, map[string]interface{}) {
+func splitTrailingFields(message string) (string, map[string]any) {
+	// Fast path: without a '=' there can be no key=value fields, so skip the
+	// tokenization (this runs for every bracketed line).
+	if !strings.Contains(message, "=") {
+		return strings.TrimSpace(message), nil
+	}
+
 	parts := strings.Fields(message)
-	fields := make(map[string]interface{})
+	var fields map[string]any
 	fieldStart := len(parts)
 
-	for i := len(parts) - 1; i >= 0; i-- {
-		key, value, ok := simpleField(parts[i])
+	for i, part := range slices.Backward(parts) {
+		key, value, ok := simpleField(part)
 		if !ok {
 			break
+		}
+		if fields == nil {
+			fields = make(map[string]any)
 		}
 		fields[key] = strings.Trim(value, `"`)
 		fieldStart = i
@@ -648,8 +648,8 @@ func simpleField(value string) (key, fieldValue string, ok bool) {
 	return key, fieldValue, true
 }
 
-func parseLogfmtFields(line string) (map[string]interface{}, bool) {
-	fields := make(map[string]interface{})
+func parseLogfmtFields(line string) (map[string]any, bool) {
+	fields := make(map[string]any)
 	i := 0
 
 	for i < len(line) {
@@ -702,16 +702,26 @@ func parseLogfmtFields(line string) (map[string]interface{}, bool) {
 	return fields, len(fields) > 0
 }
 
-func firstStringField(fields map[string]interface{}, names ...string) (string, bool) {
+func firstStringField(fields map[string]any, names ...string) (string, bool) {
 	for _, name := range names {
 		if value, ok := fields[name]; ok {
-			return fmt.Sprintf("%v", value), true
+			return stringValue(value), true
 		}
 	}
 	return "", false
 }
 
-func firstField(fields map[string]interface{}, names ...string) (interface{}, bool) {
+// stringValue returns v's string form, skipping the fmt machinery for the
+// common case where the value already is a string (logfmt and XML parsers only
+// ever produce string values; JSON messages usually are strings too).
+func stringValue(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+func firstField(fields map[string]any, names ...string) (any, bool) {
 	for _, name := range names {
 		if value, ok := fieldValue(fields, name); ok {
 			return value, true
@@ -720,14 +730,22 @@ func firstField(fields map[string]interface{}, names ...string) (interface{}, bo
 	return nil, false
 }
 
-func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) {
+func fieldValue(fields map[string]any, name string) (any, bool) {
 	if value, ok := fields[name]; ok {
 		return value, true
 	}
+	// Only a dotted name can still resolve, as a path into nested maps. This
+	// runs on every probe of a missing key (level/message/time candidates,
+	// --where, --fields), so avoid any allocation on the miss path.
+	if !strings.Contains(name, ".") {
+		return nil, false
+	}
 
-	current := interface{}(fields)
-	for _, part := range strings.Split(name, ".") {
-		currentFields, ok := current.(map[string]interface{})
+	current := any(fields)
+	rest := name
+	for {
+		part, remainder, more := strings.Cut(rest, ".")
+		currentFields, ok := current.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -736,8 +754,11 @@ func fieldValue(fields map[string]interface{}, name string) (interface{}, bool) 
 			return nil, false
 		}
 		current = value
+		if !more {
+			return current, true
+		}
+		rest = remainder
 	}
-	return current, true
 }
 
 // ParseLogEntry parses a single log line, trying each known format parser in

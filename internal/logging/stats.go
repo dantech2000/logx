@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -116,7 +117,7 @@ func statusClassOf(entry LogEntry) (int, bool) {
 	return status / 100, true
 }
 
-func toInt(v interface{}) (int, bool) {
+func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case float64:
 		return int(n), true
@@ -144,9 +145,11 @@ func (s *Stats) Write(w io.Writer) error {
 	fmt.Fprintln(&b, quoteColor().Sprint("── logx stats ──"))
 	fmt.Fprintf(&b, "lines: %d", s.total)
 	if !s.firstTS.IsZero() {
+		// firstTS/lastTS were normalized to UTC by Record, matching the other
+		// DisplayTimeLayout renderings.
 		fmt.Fprintf(&b, "   span: %s → %s",
-			s.firstTS.Format("2006-01-02 15:04:05"),
-			s.lastTS.Format("2006-01-02 15:04:05"))
+			s.firstTS.Format(DisplayTimeLayout),
+			s.lastTS.Format(DisplayTimeLayout))
 	}
 	fmt.Fprintln(&b)
 
@@ -175,11 +178,7 @@ func (s *Stats) writeStatusClasses(b *strings.Builder) {
 	if len(s.statusClass) == 0 {
 		return
 	}
-	classes := make([]int, 0, len(s.statusClass))
-	for c := range s.statusClass {
-		classes = append(classes, c)
-	}
-	slices.Sort(classes)
+	classes := slices.Sorted(maps.Keys(s.statusClass))
 	parts := make([]string, 0, len(classes))
 	for _, c := range classes {
 		parts = append(parts, fmt.Sprintf("%dxx %d", c, s.statusClass[c]))

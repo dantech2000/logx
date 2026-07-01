@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +21,7 @@ var (
 )
 
 func keyIn(key string, set []string) bool {
-	for _, k := range set {
-		if strings.EqualFold(key, k) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(set, func(k string) bool { return strings.EqualFold(key, k) })
 }
 
 // fieldKind classifies a predicate's key once (at parse time) into one of the
@@ -90,13 +86,15 @@ var predicateTokens = []struct {
 // string form against a regex. The key "level" (and lvl/severity) compares by
 // severity order, so `level>=WARN` works.
 type FieldPredicate struct {
-	key    string
-	op     predicateOp
-	val    string
-	num    float64
-	hasNum bool
-	re     *regexp.Regexp
-	kind   fieldKind
+	key      string
+	op       predicateOp
+	val      string
+	num      float64
+	hasNum   bool
+	level    LogLevel
+	hasLevel bool
+	re       *regexp.Regexp
+	kind     fieldKind
 }
 
 // ParseFieldPredicate parses an expression like "status>=500", "path~=/api", or
@@ -130,22 +128,29 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 		if n, err := strconv.ParseFloat(val, 64); err == nil {
 			fp.num, fp.hasNum = n, true
 		}
+		if fp.kind == fieldKindLevel {
+			if lvl, err := ParseLogLevel(val); err == nil {
+				fp.level, fp.hasLevel = lvl, true
+			}
+		}
 	}
 	return fp, nil
 }
 
-// operatorRunes are the characters that make up the comparison/match operators.
-// A field key composed solely of these is a parsing artifact, not a real name.
-const operatorRunes = "<>=!~"
+// PredicateOperatorChars are the characters that make up the --where
+// comparison/match operators. Exported so shell completion (cmd) can detect
+// when the user has moved past the field name without duplicating the set.
+const PredicateOperatorChars = "<>=!~"
 
 // isPureOperatorKey reports whether key is non-empty and made up entirely of
-// operator characters, e.g. ">" left over from parsing ">=5".
+// operator characters, e.g. ">" left over from parsing ">=5". Such a key is a
+// parsing artifact, not a real field name.
 func isPureOperatorKey(key string) bool {
 	if key == "" {
 		return false
 	}
 	for _, r := range key {
-		if !strings.ContainsRune(operatorRunes, r) {
+		if !strings.ContainsRune(PredicateOperatorChars, r) {
 			return false
 		}
 	}
@@ -181,7 +186,7 @@ func (fp FieldPredicate) Eval(entry LogEntry) bool {
 		// A missing field is "not equal" to any value, and fails every other test.
 		return fp.op == opNeq
 	}
-	str := fmt.Sprintf("%v", raw)
+	str := stringValue(raw)
 
 	switch fp.op {
 	case opMatch:
@@ -242,14 +247,14 @@ func (fp FieldPredicate) compareNumeric(str string) bool {
 }
 
 // evalLevel compares against the entry's level by severity order, so
-// `level>=WARN` and `level==ERROR` both work. A numeric or unknown value falls
-// back to comparing the level name.
+// `level>=WARN` and `level==ERROR` both work. The wanted level is parsed once
+// at ParseFieldPredicate time; a value that never parsed as a level falls back
+// to comparing the level name.
 func (fp FieldPredicate) evalLevel(level LogLevel) bool {
 	if fp.op == opMatch {
 		return fp.re.MatchString(level.String())
 	}
-	want, err := ParseLogLevel(fp.val)
-	if err != nil {
+	if !fp.hasLevel {
 		switch fp.op {
 		case opEq:
 			return strings.EqualFold(level.String(), fp.val)
@@ -259,40 +264,18 @@ func (fp FieldPredicate) evalLevel(level LogLevel) bool {
 			return false
 		}
 	}
-	return compareOrdered(fp.op, level, want)
+	return compareOrdered(fp.op, level, fp.level)
 }
 
-// resolveField returns the raw value for a key, handling the virtual keys
-// (message/logger/timestamp) before falling back to a structured field
-// (dot-path aware).
-func resolveField(entry LogEntry, key string) (interface{}, bool) {
-	switch {
-	case keyIn(key, messageKeys):
-		if entry.Message != "" {
-			return entry.Message, true
-		}
-		return entry.RawLine, entry.RawLine != ""
-	case keyIn(key, loggerKeys):
-		return entry.Logger, entry.Logger != ""
-	case keyIn(key, tsKeys):
-		if entry.Timestamp.IsZero() {
-			return nil, false
-		}
-		return entry.Timestamp.UTC().Format(time.RFC3339), true
-	}
-	if entry.Fields != nil {
-		if v, ok := fieldValue(entry.Fields, key); ok {
-			return v, true
-		}
-	}
-	return nil, false
-}
-
-// resolveValue is resolveField's counterpart for a FieldPredicate: it dispatches
-// on the key's precomputed kind instead of re-scanning the virtual-key groups on
-// every call, which matters here since Eval runs once per predicate per log line.
-func (fp FieldPredicate) resolveValue(entry LogEntry) (interface{}, bool) {
-	switch fp.kind {
+// resolveByKind returns the raw value for a key already classified into a
+// fieldKind, handling the virtual keys (level/message/logger/timestamp) before
+// falling back to a structured field (dot-path aware). A level kind resolves to
+// the parsed level's name; the predicate engine never asks for it (Eval routes
+// level keys to evalLevel for severity-ordered comparison first).
+func resolveByKind(entry LogEntry, kind fieldKind, key string) (any, bool) {
+	switch kind {
+	case fieldKindLevel:
+		return entry.Level.String(), true
 	case fieldKindMessage:
 		if entry.Message != "" {
 			return entry.Message, true
@@ -307,10 +290,17 @@ func (fp FieldPredicate) resolveValue(entry LogEntry) (interface{}, bool) {
 		return entry.Timestamp.UTC().Format(time.RFC3339), true
 	default:
 		if entry.Fields != nil {
-			if v, ok := fieldValue(entry.Fields, fp.key); ok {
+			if v, ok := fieldValue(entry.Fields, key); ok {
 				return v, true
 			}
 		}
 		return nil, false
 	}
+}
+
+// resolveValue resolves the predicate's key against an entry, dispatching on
+// the key's precomputed kind instead of re-scanning the virtual-key groups on
+// every call, which matters here since Eval runs once per predicate per log line.
+func (fp FieldPredicate) resolveValue(entry LogEntry) (any, bool) {
+	return resolveByKind(entry, fp.kind, fp.key)
 }

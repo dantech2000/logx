@@ -80,10 +80,10 @@ func TestFanInStreamsBoundedPoolStreamsAll(t *testing.T) {
 	const limit = 2
 	const containers = 6
 
-	var opened int32
+	var opened atomic.Int32
 	clientset := fake.NewSimpleClientset()
 	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
-		atomic.AddInt32(&opened, 1)
+		opened.Add(1)
 		ga := action.(clientgotesting.GenericAction)
 		opts := ga.GetValue().(*corev1.PodLogOptions)
 		return true, &runtime.Unknown{Raw: []byte("INFO line from " + opts.Container)}, nil
@@ -109,7 +109,7 @@ func TestFanInStreamsBoundedPoolStreamsAll(t *testing.T) {
 		t.Fatalf("GetAllContainerLogs error: %v", err)
 	}
 
-	if got := atomic.LoadInt32(&opened); int(got) != containers {
+	if got := opened.Load(); int(got) != containers {
 		t.Fatalf("opened %d streams, want all %d drained through the pool", got, containers)
 	}
 	if got := strings.Count(strings.TrimRight(buf.String(), "\n"), "\n") + 1; got != containers {

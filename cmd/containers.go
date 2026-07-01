@@ -51,14 +51,14 @@ func getContainerOptions(cmd *cobra.Command, args []string) (*containerOptions, 
 }
 
 func runContainers(cmd *cobra.Command, args []string) error {
-	clientset, namespace, err := kubernetesClientFromFlags(cmd)
-	if err != nil {
-		return fmt.Errorf("creating kubernetes client: %w", err)
-	}
-
 	opts, err := getContainerOptions(cmd, args)
 	if err != nil {
 		return err
+	}
+
+	clientset, namespace, err := kubernetesClientFromFlags(cmd)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
 	containers, err := kubernetes.ListContainers(cmd.Context(), clientset, namespace, opts.podName)

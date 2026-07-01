@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dantech2000/logx/internal/logging"
@@ -12,49 +13,48 @@ func TestGetLogOptionsParsesLevelFlags(t *testing.T) {
 		name      string
 		args      []string
 		wantPod   string
-		wantLevel string
+		wantLevel logging.LogLevel
 	}{
 		{
 			name:      "root command short level flag",
 			args:      []string{"test-pod", "-l", "WARN"},
 			wantPod:   "test-pod",
-			wantLevel: "WARN",
+			wantLevel: logging.WARN,
 		},
 		{
 			name:      "logs subcommand long level flag",
 			args:      []string{"logs", "test-pod", "--level", "ERROR"},
 			wantPod:   "test-pod",
-			wantLevel: "ERROR",
+			wantLevel: logging.ERROR,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotOptions *logOptions
+			var gotLevel logging.LogLevel
+			capture := func(cmd *cobra.Command, args []string) error {
+				options, err := getLogOptions(cmd, args)
+				if err != nil {
+					return err
+				}
+				level, err := effectiveLogLevel(cmd)
+				if err != nil {
+					return err
+				}
+				gotOptions, gotLevel = options, level
+				return nil
+			}
 			root := &cobra.Command{
 				Use:  "logx [pod-name]",
 				Args: cobra.MaximumNArgs(1),
-				RunE: func(cmd *cobra.Command, args []string) error {
-					options, err := getLogOptions(cmd, args)
-					if err != nil {
-						return err
-					}
-					gotOptions = options
-					return nil
-				},
+				RunE: capture,
 			}
 			addLogFlags(root)
 			logs := &cobra.Command{
 				Use:  "logs [pod-name]",
 				Args: cobra.ExactArgs(1),
-				RunE: func(cmd *cobra.Command, args []string) error {
-					options, err := getLogOptions(cmd, args)
-					if err != nil {
-						return err
-					}
-					gotOptions = options
-					return nil
-				},
+				RunE: capture,
 			}
 			addLogFlags(logs)
 			root.AddCommand(logs)
@@ -69,11 +69,8 @@ func TestGetLogOptionsParsesLevelFlags(t *testing.T) {
 			if gotOptions.podName != tt.wantPod {
 				t.Fatalf("podName = %q, want %q", gotOptions.podName, tt.wantPod)
 			}
-			if gotOptions.level != tt.wantLevel {
-				t.Fatalf("level = %q, want %q", gotOptions.level, tt.wantLevel)
-			}
-			if _, err := logging.ParseLogLevel(gotOptions.level); err != nil {
-				t.Fatalf("ParseLogLevel(%q) error = %v", gotOptions.level, err)
+			if gotLevel != tt.wantLevel {
+				t.Fatalf("level = %v, want %v", gotLevel, tt.wantLevel)
 			}
 		})
 	}
@@ -96,7 +93,7 @@ func TestGetLogOptionsParsesTimelineFlag(t *testing.T) {
 	}
 }
 
-func TestGetLogOptionsRejectsInvalidLevel(t *testing.T) {
+func TestEffectiveLogLevelRejectsInvalidLevel(t *testing.T) {
 	cmd := &cobra.Command{Use: "logs [pod-name]"}
 	addLogFlags(cmd)
 	cmd.SetArgs([]string{"test-pod", "--level", "NOPE"})
@@ -104,12 +101,8 @@ func TestGetLogOptionsRejectsInvalidLevel(t *testing.T) {
 		t.Fatalf("execute command: %v", err)
 	}
 
-	options, err := getLogOptions(cmd, []string{"test-pod"})
-	if err != nil {
-		t.Fatalf("getLogOptions() error = %v", err)
-	}
-	if _, err := logging.ParseLogLevel(options.level); err == nil {
-		t.Fatal("ParseLogLevel() error = nil, want error")
+	if _, err := effectiveLogLevel(cmd); err == nil {
+		t.Fatal("effectiveLogLevel() error = nil, want error")
 	}
 }
 
@@ -155,5 +148,23 @@ func TestValidateLogOptionsAllNamespaces(t *testing.T) {
 	}
 	if err := validateLogOptions(&logOptions{allNamespaces: true, selector: "app=api", maxConcurrency: 10}); err != nil {
 		t.Fatalf("--all-namespaces with --selector should be valid, got %v", err)
+	}
+}
+
+// TestLevelFlagHelpListsAllLevels pins that the shared --level help text names
+// every level the parser accepts, guarding against the drift this flag once had
+// (the logs help listed only four of the six levels).
+func TestLevelFlagHelpListsAllLevels(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	addLevelFlag(cmd)
+
+	flag := cmd.Flags().Lookup(flagLevel)
+	if flag == nil {
+		t.Fatal("--level flag not registered")
+	}
+	for _, name := range logging.LevelNames() {
+		if !strings.Contains(flag.Usage, name) {
+			t.Errorf("--level help %q missing level %s", flag.Usage, name)
+		}
 	}
 }

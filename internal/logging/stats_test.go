@@ -87,12 +87,12 @@ func TestStatsConcurrentRecord(t *testing.T) {
 
 	s := NewStats()
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
 			entry := ParseLogEntry(`{"level":"error","status":503,"path":"/api","msg":"upstream down"}`)
-			for i := 0; i < perGoroutine; i++ {
+			for range perGoroutine {
 				s.Record(entry)
 			}
 		}(g)

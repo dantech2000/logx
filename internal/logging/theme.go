@@ -41,26 +41,14 @@ func darkTheme() *Theme {
 	}
 }
 
-// lightTheme is tuned for light terminal backgrounds: the value text becomes
-// black and keys/timestamps use blue instead of the low-contrast white/cyan that
-// the dark theme relies on.
+// lightTheme is tuned for light terminal backgrounds: it is the dark theme with
+// the low-contrast cyan/white swapped for blue/black (DEBUG level, keys, values).
 func lightTheme() *Theme {
-	return &Theme{
-		levels: map[LogLevel]*color.Color{
-			TRACE: color.New(color.FgHiBlack),
-			DEBUG: color.New(color.FgBlue),
-			INFO:  color.New(color.FgGreen),
-			WARN:  color.New(color.FgYellow),
-			ERROR: color.New(color.FgRed),
-			FATAL: color.New(color.FgWhite, color.BgRed, color.Bold),
-		},
-		timestamp: color.New(color.FgBlue),
-		logger:    color.New(color.FgMagenta),
-		key:       color.New(color.FgBlue),
-		value:     color.New(color.FgBlack),
-		quote:     color.New(color.FgHiBlack),
-		errorText: color.New(color.FgRed, color.Bold),
-	}
+	t := darkTheme()
+	t.levels[DEBUG] = color.New(color.FgBlue)
+	t.key = color.New(color.FgBlue)
+	t.value = color.New(color.FgBlack)
+	return t
 }
 
 // activeTheme is the theme used by the formatter. It is configured once at

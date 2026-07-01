@@ -3,7 +3,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +29,6 @@ const (
 
 type timelineItem struct {
 	timestamp time.Time
-	order     int
 	line      string
 }
 
@@ -56,12 +55,8 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 		return err
 	}
 
-	items, err := lf.collectLogTimelineItems(ctx)
-	logErr := err
-	if err != nil {
-		items = nil
-	}
-	eventItems, eventsTruncated, err := lf.collectEventTimelineItems(ctx, len(items))
+	items, logErr := lf.collectLogTimelineItems(ctx)
+	eventItems, eventsTruncated, err := lf.collectEventTimelineItems(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,7 +68,7 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	// Container termination details (exit code, OOMKilled, signal) explain why a
 	// container died — something the events don't spell out. Reuses the pod
 	// fetched by prepareLogRequest instead of fetching it again.
-	items = append(items, lf.collectTerminationItems(pod, len(items))...)
+	items = append(items, lf.collectTerminationItems(pod)...)
 
 	// Logs failed but events are available: degrade gracefully (events often
 	// explain why logs are missing, e.g. ImagePullBackOff) while still telling
@@ -90,21 +85,20 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 		}
 	}
 
-	sort.SliceStable(items, func(i, j int) bool {
-		left, right := items[i], items[j]
-		if left.timestamp.IsZero() && right.timestamp.IsZero() {
-			return left.order < right.order
+	// Items were appended in a meaningful order (logs, then events, then
+	// terminations, each group in its own order), so a stable sort by timestamp
+	// alone keeps that order for equal keys; zero timestamps sort last.
+	slices.SortStableFunc(items, func(a, b timelineItem) int {
+		switch {
+		case a.timestamp.IsZero() && b.timestamp.IsZero():
+			return 0
+		case a.timestamp.IsZero():
+			return 1
+		case b.timestamp.IsZero():
+			return -1
+		default:
+			return a.timestamp.Compare(b.timestamp)
 		}
-		if left.timestamp.IsZero() {
-			return false
-		}
-		if right.timestamp.IsZero() {
-			return true
-		}
-		if left.timestamp.Equal(right.timestamp) {
-			return left.order < right.order
-		}
-		return left.timestamp.Before(right.timestamp)
 	})
 
 	for _, item := range items {
@@ -120,9 +114,9 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 // returning the pod so callers with further pod-shaped work (e.g. GetTimeline's
 // termination lookup) don't need to fetch it again.
 func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error) {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
+	pod, err := lf.getPod(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching pod details: %w", err)
+		return nil, err
 	}
 
 	if lf.ContainerName == "" {
@@ -134,7 +128,7 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error
 	}
 
 	if !podHasContainer(pod, lf.ContainerName) {
-		return nil, fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
+		return nil, fmt.Errorf("container %q not found in pod %q", lf.ContainerName, lf.PodName)
 	}
 
 	if lf.Previous {
@@ -143,7 +137,7 @@ func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error
 			return nil, fmt.Errorf("failed to check for previous container: %w", err)
 		}
 		if !hasPrevious {
-			return nil, fmt.Errorf("no previous terminated container found for '%s' in pod '%s'\nNote: The -p flag only works for containers that have terminated or restarted",
+			return nil, fmt.Errorf("no previous terminated container found for %q in pod %q\nNote: The -p flag only works for containers that have terminated or restarted",
 				lf.ContainerName, lf.PodName)
 		}
 	}
@@ -182,7 +176,6 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 		}
 		items = append(items, timelineItem{
 			timestamp: entry.Timestamp,
-			order:     len(items),
 			line:      formatTimelineLog(entry),
 		})
 	}
@@ -194,7 +187,7 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 
 // collectEventTimelineItems returns the timeline items for this pod's events and
 // reports whether the server-side list was truncated by the result limit.
-func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset int) ([]timelineItem, bool, error) {
+func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context) ([]timelineItem, bool, error) {
 	// Scope the server-side query to events for this pod: this avoids reading the
 	// whole namespace's events (which leaks unrelated workloads, needs broad RBAC,
 	// and floods the timeline) and bounds the result size.
@@ -217,7 +210,6 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 		timelineEvent := newTimelineEvent(event)
 		items = append(items, timelineItem{
 			timestamp: timelineEvent.Timestamp,
-			order:     orderOffset + len(items),
 			line:      formatTimelineEvent(timelineEvent),
 		})
 	}
@@ -230,17 +222,17 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 // target container — the current termination (if the container has exited) and
 // the previous instance's termination (from LastTerminationState) — carrying the
 // exit code, reason (e.g. OOMKilled), and signal.
-func (lf *LogFetcher) collectTerminationItems(pod *corev1.Pod, orderOffset int) []timelineItem {
+func (lf *LogFetcher) collectTerminationItems(pod *corev1.Pod) []timelineItem {
 	var items []timelineItem
 	for _, cs := range allContainerStatuses(pod) {
 		if cs.Name != lf.ContainerName {
 			continue
 		}
 		if t := cs.LastTerminationState.Terminated; t != nil {
-			items = append(items, terminationTimelineItem(*t, cs.Name, true, orderOffset+len(items)))
+			items = append(items, terminationTimelineItem(*t, cs.Name, true))
 		}
 		if t := cs.State.Terminated; t != nil {
-			items = append(items, terminationTimelineItem(*t, cs.Name, false, orderOffset+len(items)))
+			items = append(items, terminationTimelineItem(*t, cs.Name, false))
 		}
 	}
 	return items
@@ -257,10 +249,9 @@ func allContainerStatuses(pod *corev1.Pod) []corev1.ContainerStatus {
 	return statuses
 }
 
-func terminationTimelineItem(term corev1.ContainerStateTerminated, container string, previous bool, order int) timelineItem {
+func terminationTimelineItem(term corev1.ContainerStateTerminated, container string, previous bool) timelineItem {
 	return timelineItem{
 		timestamp: term.FinishedAt.Time,
-		order:     order,
 		line:      formatTermination(term, container, previous),
 	}
 }
@@ -369,17 +360,16 @@ func formatTimelineEvent(event timelineEvent) string {
 	if event.Count > 1 {
 		message = fmt.Sprintf("%s (x%d)", message, event.Count)
 	}
+	// event.Object was sanitized when built (formatEventObject); it contributes
+	// an optional segment between the type and the reason.
+	object := ""
 	if event.Object != "" {
-		return fmt.Sprintf("%s [EVENT] [%s] %s %s: %s",
-			formatTimelineTimestamp(event.Timestamp),
-			formatTimelineEventType(event),
-			event.Object,
-			terminal.Sanitize(event.Reason),
-			message)
+		object = " " + event.Object
 	}
-	return fmt.Sprintf("%s [EVENT] [%s] %s: %s",
+	return fmt.Sprintf("%s [EVENT] [%s]%s %s: %s",
 		formatTimelineTimestamp(event.Timestamp),
 		formatTimelineEventType(event),
+		object,
 		terminal.Sanitize(event.Reason),
 		message)
 }
@@ -421,5 +411,5 @@ func formatTimelineTimestamp(timestamp time.Time) string {
 	if timestamp.IsZero() {
 		return "[no timestamp]"
 	}
-	return fmt.Sprintf("[%s]", timestamp.UTC().Format("2006-01-02 15:04:05"))
+	return fmt.Sprintf("[%s]", timestamp.UTC().Format(logging.DisplayTimeLayout))
 }

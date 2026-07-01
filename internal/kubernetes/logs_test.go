@@ -1015,19 +1015,25 @@ func TestLogFetcher_hasPreviousContainer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fetcher := NewLogFetcher(clientset, "default", "test-pod", false, false, nil)
-			got, err := fetcher.hasPreviousContainer(context.Background(), tt.containerName)
+			fetchedPod, err := fetcher.getPod(context.Background())
+			if err != nil {
+				t.Fatalf("getPod() error = %v", err)
+			}
+			got, err := fetcher.previousContainerTerminated(fetchedPod, tt.containerName)
 			if (err != nil) != tt.wantError {
-				t.Errorf("hasPreviousContainer() error = %v, wantError %v", err, tt.wantError)
+				t.Errorf("previousContainerTerminated() error = %v, wantError %v", err, tt.wantError)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("hasPreviousContainer() = %v, want %v", got, tt.want)
+				t.Errorf("previousContainerTerminated() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestLogWriter_Write(t *testing.T) {
+// TestPipelineRendersKubeletLines pins how the pipeline (which GetLogs drives
+// line by line) renders representative kubelet-prefixed log lines.
+func TestPipelineRendersKubeletLines(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -1057,43 +1063,31 @@ func TestLogWriter_Write(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			writer := NewLogWriter(&buf)
+			pipeline := logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.DEBUG})
 
-			n, err := writer.Write([]byte(tt.input))
-			if err != nil {
-				t.Errorf("Write() error = %v", err)
-				return
+			got := ""
+			if out, ok := pipeline.ProcessLine(tt.input); ok {
+				got = out + "\n"
 			}
-
-			if n != len([]byte(tt.input)) {
-				t.Errorf("Write() wrote %v bytes, want %v", n, len([]byte(tt.input)))
-			}
-
-			if got := buf.String(); got != tt.wantLogs {
-				t.Errorf("Write() output = %q, want %q", got, tt.wantLogs)
+			if got != tt.wantLogs {
+				t.Errorf("ProcessLine() output = %q, want %q", got, tt.wantLogs)
 			}
 		})
 	}
 }
 
-func TestLogWriter_WriteFiltersByLevel(t *testing.T) {
-	var buf bytes.Buffer
-	writer := NewLogWriterWithPipeline(&buf, logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.WARN}))
+func TestPipelineFiltersByLevel(t *testing.T) {
+	pipeline := logging.NewPipeline(logging.PipelineOptions{MinLevel: logging.WARN})
 
-	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z INFO hidden")); err != nil {
-		t.Fatalf("Write() info error = %v", err)
+	if out, ok := pipeline.ProcessLine("2024-03-15T12:19:57Z INFO hidden"); ok {
+		t.Fatalf("ProcessLine() kept filtered log: %q", out)
 	}
-	if _, err := writer.Write([]byte("2024-03-15T12:19:57Z ERROR shown")); err != nil {
-		t.Fatalf("Write() error error = %v", err)
+	out, ok := pipeline.ProcessLine("2024-03-15T12:19:57Z ERROR shown")
+	if !ok {
+		t.Fatal("ProcessLine() dropped log above the filter level")
 	}
-
-	got := buf.String()
-	if strings.Contains(got, "hidden") {
-		t.Fatalf("Write() included filtered log: %q", got)
-	}
-	if !strings.Contains(got, "shown") {
-		t.Fatalf("Write() missing expected log: %q", got)
+	if !strings.Contains(out, "shown") {
+		t.Fatalf("ProcessLine() missing expected log: %q", out)
 	}
 }
 

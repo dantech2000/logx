@@ -18,9 +18,31 @@ import (
 // kept or dropped as a unit. It is therefore NOT safe for concurrent use; create
 // one Pipeline per log stream.
 type Pipeline struct {
-	opts    PipelineOptions
+	opts PipelineOptions
+	// fields is opts.Fields with each key's fieldKind classified once at
+	// construction, so the per-line projection renderers don't re-scan the
+	// virtual-key groups for every field on every line.
+	fields  []projectedField
 	tracker LevelTracker
 	stats   *Stats
+}
+
+// projectedField pairs a --fields projection key with its precomputed kind.
+type projectedField struct {
+	key  string
+	kind fieldKind
+}
+
+// classifyFields classifies each projection key once.
+func classifyFields(keys []string) []projectedField {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]projectedField, len(keys))
+	for i, k := range keys {
+		out[i] = projectedField{key: k, kind: classifyKey(k)}
+	}
+	return out
 }
 
 // PipelineOptions configures a Pipeline. The zero value emits every non-blank
@@ -51,7 +73,7 @@ type PipelineOptions struct {
 
 // NewPipeline returns a Pipeline configured by opts.
 func NewPipeline(opts PipelineOptions) *Pipeline {
-	p := &Pipeline{opts: opts}
+	p := &Pipeline{opts: opts, fields: classifyFields(opts.Fields)}
 	if opts.CollectStats {
 		p.stats = NewStats()
 	}
@@ -66,7 +88,7 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 // mode.
 func NewPipelineWithStats(opts PipelineOptions, stats *Stats) *Pipeline {
 	opts.CollectStats = true
-	return &Pipeline{opts: opts, stats: stats}
+	return &Pipeline{opts: opts, fields: classifyFields(opts.Fields), stats: stats}
 }
 
 // Stats returns the accumulated digest, or nil if CollectStats was not set.
@@ -123,15 +145,15 @@ func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
 // applied last so it works in both modes.
 func (p *Pipeline) render(entry LogEntry) string {
 	if p.opts.Output == OutputJSON {
-		if len(p.opts.Fields) > 0 {
-			return MarshalProjectedJSON(entry, p.opts.Fields)
+		if len(p.fields) > 0 {
+			return marshalProjectedJSON(entry, p.fields)
 		}
 		return MarshalEntryJSON(entry)
 	}
 
 	var out string
-	if len(p.opts.Fields) > 0 {
-		out = FormatProjectedEntry(entry, p.opts.Fields)
+	if len(p.fields) > 0 {
+		out = formatProjectedEntry(entry, p.fields)
 	} else {
 		out = FormatLogEntry(entry)
 	}

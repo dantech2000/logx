@@ -35,3 +35,13 @@ func (l LogLevel) String() string {
 		return "UNKNOWN"
 	}
 }
+
+// LevelNames lists every level name in ascending severity order. Exported so
+// help text and shell completion (cmd) derive from the same set the parser
+// accepts instead of hardcoding their own copies.
+func LevelNames() []string {
+	return []string{
+		TRACE.String(), DEBUG.String(), INFO.String(),
+		WARN.String(), ERROR.String(), FATAL.String(),
+	}
+}
