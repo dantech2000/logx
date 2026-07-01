@@ -51,7 +51,8 @@ var timelineEventTypeColors = map[timelineEventType]*color.Color{
 
 // GetTimeline writes pod logs and Kubernetes events together sorted by timestamp.
 func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
-	if err := lf.prepareLogRequest(ctx); err != nil {
+	pod, err := lf.prepareLogRequest(ctx)
+	if err != nil {
 		return err
 	}
 
@@ -70,12 +71,9 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	items = append(items, eventItems...)
 
 	// Container termination details (exit code, OOMKilled, signal) explain why a
-	// container died — something the events don't spell out. Best-effort: the pod
-	// was already validated in prepareLogRequest, so skip silently on a refetch
-	// hiccup rather than failing the whole timeline.
-	if termItems, terr := lf.collectTerminationItems(ctx, len(items)); terr == nil {
-		items = append(items, termItems...)
-	}
+	// container died — something the events don't spell out. Reuses the pod
+	// fetched by prepareLogRequest instead of fetching it again.
+	items = append(items, lf.collectTerminationItems(pod, len(items))...)
 
 	// Logs failed but events are available: degrade gracefully (events often
 	// explain why logs are missing, e.g. ImagePullBackOff) while still telling
@@ -117,52 +115,51 @@ func (lf *LogFetcher) GetTimeline(ctx context.Context) error {
 	return nil
 }
 
-func (lf *LogFetcher) prepareLogRequest(ctx context.Context) error {
+// prepareLogRequest fetches the pod once and validates the requested container
+// (and, if --previous is set, its restart history) against that single fetch,
+// returning the pod so callers with further pod-shaped work (e.g. GetTimeline's
+// termination lookup) don't need to fetch it again.
+func (lf *LogFetcher) prepareLogRequest(ctx context.Context) (*corev1.Pod, error) {
+	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("error fetching pod details: %w", err)
+	}
+
 	if lf.ContainerName == "" {
-		containerName, err := lf.getSingleContainerName(ctx)
+		containerName, err := lf.selectContainerName(pod)
 		if err != nil {
-			return fmt.Errorf("failed to get container name: %w", err)
+			return nil, fmt.Errorf("failed to get container name: %w", err)
 		}
 		lf.ContainerName = containerName
 	}
 
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("error fetching pod details: %w", err)
-	}
-
 	if !podHasContainer(pod, lf.ContainerName) {
-		return fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
+		return nil, fmt.Errorf("container '%s' not found in pod '%s'", lf.ContainerName, lf.PodName)
 	}
 
 	if lf.Previous {
-		hasPrevious, err := lf.hasPreviousContainer(ctx, lf.ContainerName)
+		hasPrevious, err := lf.previousContainerTerminated(pod, lf.ContainerName)
 		if err != nil {
-			return fmt.Errorf("failed to check for previous container: %w", err)
+			return nil, fmt.Errorf("failed to check for previous container: %w", err)
 		}
 		if !hasPrevious {
-			return fmt.Errorf("no previous terminated container found for '%s' in pod '%s'\nNote: The -p flag only works for containers that have terminated or restarted",
+			return nil, fmt.Errorf("no previous terminated container found for '%s' in pod '%s'\nNote: The -p flag only works for containers that have terminated or restarted",
 				lf.ContainerName, lf.PodName)
 		}
 	}
 
-	return nil
+	return pod, nil
 }
 
 func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineItem, error) {
 	// --since/--tail bound the log portion of the timeline just as they bound a
-	// plain log fetch. Timestamps stay forced on (the timeline sorts by them);
-	// --tail limits the trailing log lines, while events are bounded separately by
-	// maxTimelineEvents.
-	podLogOpts := corev1.PodLogOptions{
-		Container:    lf.ContainerName,
-		Follow:       false,
-		Previous:     lf.Previous,
-		Timestamps:   true,
-		SinceSeconds: lf.SinceSeconds,
-		SinceTime:    lf.SinceTime,
-		TailLines:    lf.TailLines,
-	}
+	// plain log fetch. Follow and Timestamps are forced regardless of the fetcher's
+	// own settings: the timeline never follows, and it always needs timestamps to
+	// sort by; --tail limits the trailing log lines, while events are bounded
+	// separately by maxTimelineEvents.
+	podLogOpts := lf.podLogOptions(lf.ContainerName)
+	podLogOpts.Follow = false
+	podLogOpts.Timestamps = true
 
 	req := lf.Clientset.CoreV1().Pods(lf.Namespace).GetLogs(lf.PodName, &podLogOpts)
 	podLogs, err := req.Stream(ctx)
@@ -233,12 +230,7 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context, orderOffset
 // target container — the current termination (if the container has exited) and
 // the previous instance's termination (from LastTerminationState) — carrying the
 // exit code, reason (e.g. OOMKilled), and signal.
-func (lf *LogFetcher) collectTerminationItems(ctx context.Context, orderOffset int) ([]timelineItem, error) {
-	pod, err := lf.Clientset.CoreV1().Pods(lf.Namespace).Get(ctx, lf.PodName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error fetching pod details: %w", err)
-	}
-
+func (lf *LogFetcher) collectTerminationItems(pod *corev1.Pod, orderOffset int) []timelineItem {
 	var items []timelineItem
 	for _, cs := range allContainerStatuses(pod) {
 		if cs.Name != lf.ContainerName {
@@ -251,7 +243,7 @@ func (lf *LogFetcher) collectTerminationItems(ctx context.Context, orderOffset i
 			items = append(items, terminationTimelineItem(*t, cs.Name, false, orderOffset+len(items)))
 		}
 	}
-	return items, nil
+	return items
 }
 
 // allContainerStatuses returns the statuses of regular, init, and ephemeral
