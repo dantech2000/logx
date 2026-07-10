@@ -9,19 +9,24 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    name: Build & Test
+  build:
+    name: Build & Vet
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.x'
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Build
         run: go build ./...
@@ -29,43 +34,55 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  test:
+    name: Race tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: go.sum
+
       - name: Test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race ./...
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.x'
           cache: true
-
-      # Install golangci-lint v2 with the workflow's Go toolchain so the binary's
-      # build Go version matches the module's go directive (the prebuilt release
-      # binaries lag the latest Go and otherwise refuse to load the config).
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          cache-dependency-path: go.sum
 
       - name: Run golangci-lint
-        run: golangci-lint run ./...
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
 
   govulncheck:
     name: Vulnerability scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.x'
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Run govulncheck
         run: |
