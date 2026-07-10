@@ -14,7 +14,9 @@ import (
 var parserSeeds = []string{
 	"",
 	"plain message no level",
+	"TRACE request details",
 	"2026-06-24 10:06:00 INFO started app",
+	"FATAL unrecoverable failure",
 	`{"level":"error","msg":"boom","ts":"2026-06-24T10:00:00Z"}`,
 	`{"level":50,"time":1779616800000,"msg":"pino"}`,
 	`[2026-06-24 10:07:00] [WARN] [api] msg key=val`,
@@ -32,7 +34,7 @@ var parserSeeds = []string{
 // valid UTF-8 with no raw ESC byte, and a level in range.
 func assertSafeRender(t *testing.T, in string, entry LogEntry) {
 	t.Helper()
-	if entry.Level < DEBUG || entry.Level > ERROR {
+	if entry.Level < TRACE || entry.Level > FATAL {
 		t.Fatalf("ParseLogEntry(%q) returned out-of-range level %d", in, entry.Level)
 	}
 	out := FormatLogEntry(entry)
@@ -56,12 +58,12 @@ func FuzzParseLogEntry(f *testing.F) {
 }
 
 func FuzzParseLogLevel(f *testing.F) {
-	for _, s := range []string{"", "INFO", "warn", "3", "-1", "40.5", "notalevel", "  ERROR  ", "\x00"} {
+	for _, s := range []string{"", "TRACE", "INFO", "warn", "FATAL", "3", "-1", "40.5", "notalevel", "  ERROR  ", "\x00"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
 		level, err := ParseLogLevel(in)
-		if err == nil && (level < DEBUG || level > ERROR) {
+		if err == nil && (level < TRACE || level > FATAL) {
 			t.Fatalf("ParseLogLevel(%q) = %d with nil error, out of range", in, level)
 		}
 	})
@@ -69,13 +71,15 @@ func FuzzParseLogLevel(f *testing.F) {
 
 func FuzzFilterAndFormatLogs(f *testing.F) {
 	color.NoColor = true
-	f.Add("line1\nline2\n", uint8(0))
-	f.Add(strings.Join(parserSeeds, "\n"), uint8(2))
+	f.Add("TRACE details\n", uint8(TRACE))
+	f.Add(strings.Join(parserSeeds, "\n"), uint8(INFO))
+	f.Add("FATAL failure\n", uint8(FATAL))
 	f.Fuzz(func(t *testing.T, data string, lvl uint8) {
 		var buf bytes.Buffer
 		// Must never panic and must always return a nil error for an in-memory
 		// reader/writer regardless of content.
-		if err := FilterAndFormatLogs(strings.NewReader(data), &buf, LogLevel(lvl%4)); err != nil {
+		level := TRACE + LogLevel(lvl%uint8(FATAL-TRACE+1))
+		if err := FilterAndFormatLogs(strings.NewReader(data), &buf, level); err != nil {
 			t.Fatalf("FilterAndFormatLogs error on %q: %v", data, err)
 		}
 		out := buf.String()
