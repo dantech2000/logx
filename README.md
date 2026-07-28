@@ -352,6 +352,26 @@ Shell completion:
 logx completion zsh > "${fpath[1]}/_logx"
 ```
 
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Ran successfully, **including when no lines matched the filters** |
+| `1`  | An error occurred (pod or file not found, invalid `--grep`/`--where`, unusable flag combination, cluster failure) |
+
+`logx` does not follow `grep`'s convention of exiting `1` on "no match" — an empty
+result is a successful run. To branch on whether anything matched, test the
+output instead:
+
+```bash
+if logx logs my-pod -l ERROR | grep -q .; then
+  echo "errors found"
+fi
+```
+
+Interrupting with Ctrl-C stops the run and exits `0`; a second Ctrl-C terminates
+immediately.
+
 ## Development
 
 Prerequisites:
