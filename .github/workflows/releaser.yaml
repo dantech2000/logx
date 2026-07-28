@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Callable so another workflow can cut a release in the same run. A tag pushed
+  # with GITHUB_TOKEN does NOT trigger the push event above — GitHub suppresses
+  # that to avoid recursive runs — so security-release.yml calls this directly
+  # rather than relying on its tag push to start it.
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag to build the release from.
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +25,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          # On a tag push this is empty and checkout uses the triggering ref.
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
       
       - name: Set up Go
