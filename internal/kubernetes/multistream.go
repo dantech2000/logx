@@ -122,10 +122,12 @@ type prefixedStream struct {
 	prefix    string
 }
 
-// defaultMaxConcurrency bounds how many container log streams are read at once
+// DefaultMaxConcurrency bounds how many container log streams are read at once
 // when no --max-concurrency is given. It keeps a wide --selector/--all-containers
-// fan-out from opening hundreds of simultaneous API requests.
-const defaultMaxConcurrency = 10
+// fan-out from opening hundreds of simultaneous API requests. Exported so the
+// --max-concurrency flag default is declared from this one value rather than a
+// second literal in the command layer.
+const DefaultMaxConcurrency = 10
 
 // fanInStreams runs the streams through a bounded worker pool, serializing writes
 // to the shared writer, and returns the first error encountered. A failing
@@ -145,26 +147,52 @@ func (lf *LogFetcher) fanInStreams(ctx context.Context, streams []prefixedStream
 	g.SetLimit(lf.effectiveMaxConcurrency(len(streams)))
 	for _, s := range streams {
 		g.Go(func() error {
+			// After a Ctrl-C every queued stream would otherwise still issue its
+			// (doomed) API request as slots free up, producing a burst of failures
+			// on the way out.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return lf.streamPrefixed(ctx, s, &mu, shared)
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
+	streamErr := g.Wait()
+
+	// The digest is written even when a stream failed. Streams are deliberately
+	// independent — one failure does not cancel its siblings — so the aggregate
+	// over the streams that did succeed is still the useful answer. Returning
+	// early here would mean a single pod stuck in ContainerCreating blanks the
+	// digest for every healthy pod in a wide --selector fan-out. All workers have
+	// finished by now, so this write needs no lock.
 	if shared != nil {
-		return shared.Write(lf.Writer)
+		if err := shared.Write(lf.Writer); err != nil && streamErr == nil {
+			return err
+		}
 	}
-	return nil
+	return streamErr
 }
 
 // effectiveMaxConcurrency resolves the worker count for streamCount streams:
 // MaxConcurrency when set (else the default), never more than the number of
 // streams and never below one.
+//
+// The cap does not apply under --follow. errgroup's limit blocks the dispatch
+// loop until a slot frees, and a followed stream never returns — so a pool
+// smaller than the stream count does not throttle, it *starves*: the streams past
+// the limit are never opened at all, for the life of the command. Tailing a
+// 20-replica Deployment showed only the first 10 pods, silently and permanently,
+// which is the worst failure mode a log viewer can have. The cap exists to bound
+// a burst of finite requests; a follow is a set of long-lived, mostly idle
+// connections that must all be open simultaneously for the feature to work at
+// all, so every stream is opened (as kubectl does for its own fan-out).
 func (lf *LogFetcher) effectiveMaxConcurrency(streamCount int) int {
+	if lf.Follow {
+		return max(1, streamCount)
+	}
 	limit := lf.MaxConcurrency
 	if limit <= 0 {
-		limit = defaultMaxConcurrency
+		limit = DefaultMaxConcurrency
 	}
 	return max(1, min(limit, streamCount))
 }

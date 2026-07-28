@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1136,4 +1137,228 @@ func TestLogFetcher_GetTimelineShowsTerminationDetails(t *testing.T) {
 	}
 	// The termination (00:38:10) sorts after the earlier log line (00:38:02).
 	assertInOrder(t, got, []string{"application started", "OOMKilled"})
+}
+
+// TestLogFetcher_GetTimelineAppliesContentFilters pins that --grep/--exclude/
+// --where reach the log portion of the timeline. collectLogTimelineItems used to
+// consult only FilterLevel and ignore lf.Filters entirely, so every content
+// filter was silently discarded and the command exited 0 having shown lines the
+// user explicitly filtered out.
+func TestLogFetcher_GetTimelineAppliesContentFilters(t *testing.T) {
+	logs := strings.Join([]string{
+		"2026-05-15T00:38:02Z ERROR keep me",
+		"2026-05-15T00:38:03Z ERROR drop me",
+		"2026-05-15T00:38:04Z ERROR keep me too",
+	}, "\n")
+
+	newFetcher := func(buf *bytes.Buffer) *LogFetcher {
+		clientset := fake.NewSimpleClientset()
+		clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+			return true, &runtime.Unknown{Raw: []byte(logs)}, nil
+		})
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		}
+		if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod: %v", err)
+		}
+		f := NewLogFetcher(clientset, "default", "test-pod", false, false, buf)
+		f.ContainerName = "app"
+		f.FilterLevel = logging.DEBUG
+		return f
+	}
+
+	t.Run("grep keeps only matching lines", func(t *testing.T) {
+		var buf bytes.Buffer
+		f := newFetcher(&buf)
+		f.Filters = logging.PipelineOptions{
+			MinLevel: logging.DEBUG,
+			Include:  []*regexp.Regexp{regexp.MustCompile("keep me")},
+		}
+		if err := f.GetTimeline(context.Background()); err != nil {
+			t.Fatalf("GetTimeline error: %v", err)
+		}
+		if strings.Contains(buf.String(), "drop me") {
+			t.Fatalf("--grep was ignored by --timeline:\n%s", buf.String())
+		}
+		if !strings.Contains(buf.String(), "keep me") {
+			t.Fatalf("--grep dropped the matching line:\n%s", buf.String())
+		}
+	})
+
+	t.Run("exclude removes matching lines", func(t *testing.T) {
+		var buf bytes.Buffer
+		f := newFetcher(&buf)
+		f.Filters = logging.PipelineOptions{
+			MinLevel: logging.DEBUG,
+			Exclude:  []*regexp.Regexp{regexp.MustCompile("drop me")},
+		}
+		if err := f.GetTimeline(context.Background()); err != nil {
+			t.Fatalf("GetTimeline error: %v", err)
+		}
+		if strings.Contains(buf.String(), "drop me") {
+			t.Fatalf("--exclude was ignored by --timeline:\n%s", buf.String())
+		}
+	})
+
+	t.Run("where predicate filters entries", func(t *testing.T) {
+		var buf bytes.Buffer
+		f := newFetcher(&buf)
+		pred, err := logging.ParseFieldPredicate("level>=FATAL")
+		if err != nil {
+			t.Fatalf("ParseFieldPredicate: %v", err)
+		}
+		f.Filters = logging.PipelineOptions{MinLevel: logging.DEBUG, Where: []logging.FieldPredicate{pred}}
+		if err := f.GetTimeline(context.Background()); err != nil {
+			t.Fatalf("GetTimeline error: %v", err)
+		}
+		if strings.Contains(buf.String(), "[LOG]") {
+			t.Fatalf("--where was ignored by --timeline; no ERROR line satisfies level>=FATAL:\n%s", buf.String())
+		}
+	})
+}
+
+// TestPreviousContainerTerminatedCoversInitAndEphemeral pins that the -p
+// precondition check sees the same set of containers the rest of the tool does.
+// It scanned only pod.Status.ContainerStatuses, while podHasContainer and
+// allContainerStatuses both include init and ephemeral containers — so
+// `logx logs pod -c init-db -p` was accepted as a valid container and then
+// rejected as nonexistent by a self-contradicting error. Reading a crashlooping
+// init container's prior logs is the single most common use of -p.
+func TestPreviousContainerTerminatedCoversInitAndEphemeral(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers:     []corev1.Container{{Name: "app"}},
+			InitContainers: []corev1.Container{{Name: "init-db"}},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses:     []corev1.ContainerStatus{{Name: "app", RestartCount: 0}},
+			InitContainerStatuses: []corev1.ContainerStatus{{Name: "init-db", RestartCount: 7}},
+			EphemeralContainerStatuses: []corev1.ContainerStatus{
+				{Name: "debugger", RestartCount: 2},
+			},
+		},
+	}
+
+	lf := NewLogFetcher(fake.NewSimpleClientset(), "default", "p", false, true, &bytes.Buffer{})
+
+	tests := []struct {
+		container     string
+		wantRestarted bool
+		wantErr       bool
+	}{
+		{container: "init-db", wantRestarted: true},
+		{container: "debugger", wantRestarted: true},
+		{container: "app", wantRestarted: false},
+		{container: "nope", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.container, func(t *testing.T) {
+			got, err := lf.previousContainerTerminated(pod, tc.container)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for unknown container %q", tc.container)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.container, err)
+			}
+			if got != tc.wantRestarted {
+				t.Fatalf("restarted = %v, want %v", got, tc.wantRestarted)
+			}
+		})
+	}
+}
+
+// TestLogFetcher_GetTimelineExcludesOtherObjectKinds pins that the timeline
+// shows only the pod's own events. The server-side field selector matches on
+// involvedObject.name alone and the client-side guard compared only Name, so a
+// Service, Deployment, or PVC sharing the pod's name — a common naming
+// convention — leaked its events into a view documented as the pod's own.
+func TestLogFetcher_GetTimelineExcludesOtherObjectKinds(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, &runtime.Unknown{Raw: []byte("2026-05-15T00:38:02Z INFO hello")}, nil
+	})
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	podEvent := testPodEvent("web", "Normal", "Scheduled", "assigned to node", "2026-05-15T00:38:01Z")
+	svcEvent := testEvent("Service", "web", "Warning", "UnrelatedServiceEvent", "this belongs to the Service", "2026-05-15T00:38:03Z")
+	for _, e := range []*corev1.Event{podEvent, svcEvent} {
+		if _, err := clientset.CoreV1().Events("default").Create(context.Background(), e, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "web", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.DEBUG
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
+		t.Fatalf("GetTimeline error: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "UnrelatedServiceEvent") {
+		t.Fatalf("a Service event leaked into the pod's timeline:\n%s", out)
+	}
+	if !strings.Contains(out, "Scheduled") {
+		t.Fatalf("the pod's own event was dropped:\n%s", out)
+	}
+}
+
+// TestSelectContainerNameNonInteractive pins that a multi-container pod fails
+// with actionable guidance instead of attempting a prompt when stdin is not a
+// terminal. survey was invoked unconditionally, so in a script or pipeline it
+// reported a bare "selection failed: EOF" — and, because survey defaults to
+// os.Stdout rather than the command's writer, it wrote the ANSI prompt into
+// redirected output (`logx logs pod -o json > out.json` landed escape sequences
+// and a menu in out.json). Go test runs with stdin not a char device, so this
+// exercises the non-interactive path directly.
+func TestSelectContainerNameNonInteractive(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "multi", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app"}, {Name: "sidecar"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	lf := NewLogFetcher(fake.NewSimpleClientset(), "default", "multi", false, false, &buf)
+
+	name, err := lf.selectContainerName(pod)
+	if err == nil {
+		t.Fatalf("expected an error for a multi-container pod with no TTY, got container %q", name)
+	}
+	for _, want := range []string{"--container", "app", "sidecar"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q so the user knows what to do", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "EOF") {
+		t.Errorf("error should explain the fix, not leak the prompt failure: %q", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("nothing should be written to the command writer: %q", buf.String())
+	}
+
+	// A single-container pod still resolves without prompting.
+	single := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "one", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "only"}}},
+	}
+	got, err := lf.selectContainerName(single)
+	if err != nil || got != "only" {
+		t.Fatalf("single-container pod: got (%q, %v), want (\"only\", nil)", got, err)
+	}
 }
