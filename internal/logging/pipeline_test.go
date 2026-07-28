@@ -2,6 +2,9 @@ package logging
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -64,7 +67,7 @@ func TestPipelineGroupsMultiLineEntry(t *testing.T) {
 func TestPipelineRunMatchesFilterAndFormat(t *testing.T) {
 	input := "DEBUG a\nINFO b\nWARN c\n"
 	var viaPipeline, viaWrapper bytes.Buffer
-	if err := NewPipeline(PipelineOptions{MinLevel: INFO}).Run(strings.NewReader(input), &viaPipeline); err != nil {
+	if err := NewPipeline(PipelineOptions{MinLevel: INFO}).Run(context.Background(), strings.NewReader(input), &viaPipeline); err != nil {
 		t.Fatalf("Pipeline.Run error = %v", err)
 	}
 	if err := FilterAndFormatLogs(strings.NewReader(input), &viaWrapper, INFO); err != nil {
@@ -182,5 +185,41 @@ func TestNewPipelineWithStatsSharesAccumulator(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "lines: 2") {
 		t.Fatalf("digest did not aggregate both pipelines:\n%s", buf.String())
+	}
+}
+
+// TestPipelineRunHonorsContextCancellation pins that a long run can be
+// interrupted. signal.NotifyContext takes over SIGINT/SIGTERM for the whole
+// process, removing the default kill behavior — so with nothing observing the
+// context, Ctrl-C during a large `logx parse` was caught, cancelled a context no
+// one read, and left the run unstoppable short of SIGKILL.
+func TestPipelineRunHonorsContextCancellation(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorNever)
+
+	var input strings.Builder
+	for i := range 200_000 {
+		fmt.Fprintf(&input, "{\"level\":\"info\",\"msg\":\"line %d\"}\n", i)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled: Run must stop before doing the work
+
+	var out strings.Builder
+	err := NewPipeline(PipelineOptions{MinLevel: TRACE}).Run(ctx, strings.NewReader(input.String()), &out)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("Run emitted %d bytes after the context was already cancelled", out.Len())
+	}
+
+	// A live context still processes everything.
+	out.Reset()
+	if err := NewPipeline(PipelineOptions{MinLevel: TRACE}).Run(context.Background(), strings.NewReader("INFO one\nINFO two\n"), &out); err != nil {
+		t.Fatalf("Run with a live context: %v", err)
+	}
+	if got := strings.Count(strings.TrimRight(out.String(), "\n"), "\n") + 1; got != 2 {
+		t.Fatalf("expected 2 lines, got %d: %q", got, out.String())
 	}
 }

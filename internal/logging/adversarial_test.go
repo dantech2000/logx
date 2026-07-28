@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/fatih/color"
 )
 
 // adversarialLines is a grab-bag of malformed, hostile, and degenerate inputs:
@@ -33,6 +35,17 @@ var adversarialLines = []string{
 	"status=999999999999999999999999999",
 	"\t\t\t  indented only",
 	"🔥💥 emoji and 日本語 unicode ok",
+	// Control characters json.Marshal does NOT escape: DEL, the C1 range (a UTF-8
+	// terminal maps U+009B to CSI), and a Trojan-Source bidi override.
+	"{\"level\":\"info\",\"msg\":\"del\x7f c1\u009b31m rlo\u202e\"}",
+	"plain \x7f and \u009b31m and \u202e reversed",
+	"{\"level\":\"info\",\"f\u202eield\":\"bidi in the key\"}",
+	// Values json.Marshal cannot encode at all, which used to erase the entry.
+	"{level: error, msg: nan, ratio: .nan}",
+	"{level: error, msg: inf, ratio: .inf}",
+	// Message aliases where the first one present is empty or null.
+	`{"level":"error","message":"","msg":"real content"}`,
+	`{"level":"error","message":null,"msg":"real content"}`,
 }
 
 // runAllFeatures pushes a line through a pipeline with every feature stacked on,
@@ -86,6 +99,11 @@ func TestPipelineSurvivesAdversarialInputJSON(t *testing.T) {
 		if !json.Valid([]byte(out)) {
 			t.Fatalf("JSON output is not valid for input %q: %q", line, out)
 		}
+		// Validity is not safety. json.Marshal escapes only code points below
+		// 0x20, so DEL, the C1 controls, and bidi overrides produce output that is
+		// perfectly valid JSON and still drives a terminal. Asserting only
+		// json.Valid here is what let that gap persist.
+		assertNoControlBytes(t, out)
 	}
 }
 
@@ -121,6 +139,53 @@ func TestStatsSurvivesAdversarialInput(t *testing.T) {
 	if !utf8.ValidString(b.String()) {
 		t.Fatal("stats summary is not valid UTF-8")
 	}
+	assertNoControlBytes(t, b.String())
+}
+
+// assertNoControlBytes fails if s carries a raw control character. The digest
+// embeds untrusted log content verbatim in its "top messages" section, so it
+// needs the same escape-neutralizing guarantee as every other render path. Tests
+// calling this run with color off, so any control byte necessarily came from the
+// input rather than from theming. Newline and tab are the legitimate structural
+// characters Sanitize itself preserves.
+func assertNoControlBytes(t *testing.T, s string) {
+	t.Helper()
+	for _, r := range s {
+		if r == '\n' || r == '\t' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("output leaked raw control byte %#U: %q", r, s)
+		}
+	}
+}
+
+// TestStatsTopMessagesSanitized pins the leak directly rather than relying on
+// the adversarial corpus reaching the digest. Only the top 5 messages are
+// printed and ties break lexicographically, so a hostile line can be recorded
+// yet sorted out of the rendered output — which is exactly how an unsanitized
+// writeTopMessages stayed invisible to the corpus test above. Repeating the
+// hostile line guarantees it ranks first.
+func TestStatsTopMessagesSanitized(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorNever)
+
+	// No digits: templateMessage's number collapsing leaves this escape sequence
+	// intact, so an unsanitized digest emits a working clear-screen + cursor-home.
+	const hostile = "wipe \x1b[J\x1b[H gone"
+	s := NewStats()
+	for range 3 {
+		s.Record(ParseLogEntry(hostile))
+	}
+
+	var b strings.Builder
+	if err := s.Write(&b); err != nil {
+		t.Fatalf("stats Write error: %v", err)
+	}
+	assertNoControlBytes(t, b.String())
+	if !strings.Contains(b.String(), `\x1B`) {
+		t.Fatalf("expected the escape to survive in escaped form, got %q", b.String())
+	}
 }
 
 // FuzzPipelineAllFeatures stacks grep, where, projection-free text and JSON
@@ -152,6 +217,13 @@ func FuzzPipelineAllFeatures(f *testing.F) {
 				if !json.Valid([]byte(out)) {
 					t.Fatalf("invalid JSON for %q: %q", line, out)
 				}
+				// NDJSON needs the same terminal-safety guarantee as the text
+				// renderer: it is read in a terminal as often as it is piped to jq,
+				// and json.Marshal escapes only code points below 0x20 — DEL, the C1
+				// controls (U+009B is CSI to a UTF-8 terminal), and bidi overrides
+				// all passed through raw. Checking only json.Valid here is what let
+				// that gap persist.
+				assertNoControlBytes(t, out)
 				continue
 			}
 			if !utf8.ValidString(out) {
@@ -187,5 +259,54 @@ func FuzzParseFieldPredicate(f *testing.F) {
 		}
 		_ = fp.Eval(sample) // must not panic
 		_ = fp.Eval(ParseLogEntry("plain text line"))
+	})
+}
+
+// FuzzHighlightPreservesVisibleText fuzzes the one path the suite above
+// deliberately excludes. Every other adversarial test forces ColorNever "to keep
+// highlight from emitting escapes we'd flag", which means match highlighting —
+// the only renderer that rewrites an already-colorized string — was never
+// exercised with color on. That blind spot is exactly where a pattern matching
+// inside a theme escape sequence could corrupt output unnoticed.
+//
+// The invariant is that highlighting may only insert reverse-video toggles: the
+// text with all escape sequences stripped must be identical before and after,
+// and every ESC must still introduce a well-formed CSI sequence.
+func FuzzHighlightPreservesVisibleText(f *testing.F) {
+	for _, l := range adversarialLines {
+		f.Add(l, `[0-9]+`)
+		f.Add(l, `[a-z]`)
+	}
+	for _, pat := range []string{`m`, `\[`, `[0-9;]+`, `.`, `\x1b`, `ERROR|WARN`, `^`, `$`} {
+		f.Add(`{"level":"error","msg":"db down","status":500}`, pat)
+		f.Add("GET /api status=200 took 45ms", pat)
+	}
+
+	f.Fuzz(func(t *testing.T, data, pattern string) {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			t.Skip() // only well-formed user patterns reach highlightMatches
+		}
+		prev := color.NoColor
+		defer func() { color.NoColor = prev }()
+		ApplyColorMode(ColorAlways)
+
+		for line := range strings.SplitSeq(data, "\n") {
+			rendered := FormatLogEntry(ParseLogEntry(line))
+			highlighted := highlightMatches(rendered, []*regexp.Regexp{re})
+
+			if got, want := visibleText(highlighted), visibleText(rendered); got != want {
+				t.Fatalf("highlight changed visible text for pattern %q\n  got  %q\n  want %q",
+					pattern, got, want)
+			}
+			for i := 0; i < len(highlighted); i++ {
+				if highlighted[i] != 0x1b {
+					continue
+				}
+				if loc := ansiStripRegex.FindStringIndex(highlighted[i:]); loc == nil || loc[0] != 0 {
+					t.Fatalf("malformed escape at byte %d for pattern %q: %q", i, pattern, highlighted)
+				}
+			}
+		}
 	})
 }

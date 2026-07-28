@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/dantech2000/logx/internal/terminal"
@@ -25,21 +26,86 @@ const (
 // the columns of the different views line up.
 const DisplayTimeLayout = "2006-01-02 15:04:05"
 
+// ansiCSIRegex matches one CSI escape sequence: ESC '[', parameter bytes
+// (0x30–0x3F), intermediate bytes (0x20–0x2F), then a final byte (0x40–0x7E).
+// Untrusted content is escape-neutralized by terminal.Sanitize before it is ever
+// rendered, so the only sequences present in a formatted line are the theme's
+// own SGR codes and this covers all of them.
+var ansiCSIRegex = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
+
+// ansiSpan records one escape sequence removed by stripANSI: where it sat in the
+// stripped text, and how many bytes had been removed up to and including it.
+type ansiSpan struct {
+	plainOffset int
+	removed     int
+}
+
+// stripANSI returns s with its CSI escape sequences removed, plus the table
+// needed to map an offset in the stripped text back to its offset in s. A nil
+// table means s carried no escapes, so offsets map identically.
+func stripANSI(s string) (string, []ansiSpan) {
+	locs := ansiCSIRegex.FindAllStringIndex(s, -1)
+	if len(locs) == 0 {
+		return s, nil
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	table := make([]ansiSpan, 0, len(locs))
+	prev, removed := 0, 0
+	for _, loc := range locs {
+		b.WriteString(s[prev:loc[0]])
+		removed += loc[1] - loc[0]
+		table = append(table, ansiSpan{plainOffset: b.Len(), removed: removed})
+		prev = loc[1]
+	}
+	b.WriteString(s[prev:])
+	return b.String(), table
+}
+
+// originalOffset maps a byte offset in the stripped text back into the original.
+// inclusive decides whether a sequence sitting exactly at that offset counts as
+// preceding it: true for a span's start, so the highlight opens after any theme
+// code; false for its end, so a trailing theme code stays outside the highlight.
+func originalOffset(table []ansiSpan, plainOffset int, inclusive bool) int {
+	n := sort.Search(len(table), func(i int) bool {
+		if inclusive {
+			return table[i].plainOffset > plainOffset
+		}
+		return table[i].plainOffset >= plainOffset
+	})
+	if n == 0 {
+		return plainOffset
+	}
+	return plainOffset + table[n-1].removed
+}
+
 // highlightMatches wraps every non-overlapping match of any pattern in s with
 // reverse-video so grep matches stand out. Overlapping match ranges from
 // different patterns are merged. It is a no-op when color is disabled, so plain
 // output stays free of escape codes.
+//
+// Matching runs against the *visible* text — s with the theme's escape sequences
+// stripped — and each match is then mapped back to its offset in s. Matching s
+// directly would let an ordinary pattern match the bytes inside an SGR sequence
+// (the "36" or the trailing "m" of "\x1b[36m") and splice reverse-video codes
+// into the middle of it, both corrupting the sequence and changing the text the
+// user sees. Patterns as common as `[a-z]`, `[0-9]+`, or `m` hit this.
 func highlightMatches(s string, patterns []*regexp.Regexp) string {
 	if color.NoColor || len(patterns) == 0 || s == "" {
 		return s
 	}
 
+	plain, table := stripANSI(s)
+
 	type span struct{ start, end int }
 	var spans []span
 	for _, re := range patterns {
-		for _, m := range re.FindAllStringIndex(s, -1) {
+		for _, m := range re.FindAllStringIndex(plain, -1) {
 			if m[1] > m[0] { // ignore zero-width matches
-				spans = append(spans, span{m[0], m[1]})
+				spans = append(spans, span{
+					start: originalOffset(table, m[0], true),
+					end:   originalOffset(table, m[1], false),
+				})
 			}
 		}
 	}
@@ -213,7 +279,7 @@ func formatStructuredDetails(entry LogEntry) string {
 	if entry.Message != "" && entry.Message != entry.RawLine {
 		parts = append(parts, formatMessage(entry, terminal.Sanitize(entry.Message)))
 	}
-	parts = append(parts, formatSortedFields(entry.Fields)...)
+	parts = append(parts, formatSortedFields(entry.Fields, "")...)
 	if len(parts) == 0 {
 		return formatPlainTextDetails(entry)
 	}
@@ -229,7 +295,7 @@ func formatJSONDetails(entry LogEntry) string {
 	if msg := jsonMessage(entry); msg != "" {
 		fields = append(fields, formatMessage(entry, msg))
 	}
-	fields = append(fields, formatSortedFields(entry.Fields)...)
+	fields = append(fields, formatSortedFields(entry.Fields, entry.Logger)...)
 
 	return strings.Join(fields, " ")
 }
@@ -246,9 +312,32 @@ func formatPlainTextDetails(entry LogEntry) string {
 	return sanitized
 }
 
+// jsonMessage returns the display message for a JSON entry.
+//
+// It uses the message the parser already resolved rather than re-deriving it
+// from the fields. Resolving it twice let the two copies disagree: this one took
+// the first message alias that was merely *present*, so an entry carrying
+// {"message":"","msg":"database connection refused"} rendered as a blank message
+// in text while --output json rendered it correctly. An entry whose Message is
+// the raw line had no message field at all, and printing it here would duplicate
+// the line ahead of the fields.
 func jsonMessage(entry LogEntry) string {
-	if s, ok := firstStringField(entry.Fields, jsonMessageFields...); ok {
-		return terminal.Sanitize(s)
+	if entry.Message != "" {
+		if entry.Message == entry.RawLine {
+			return "" // no message field at all; the fields carry the content
+		}
+		return terminal.Sanitize(entry.Message)
+	}
+	// Fall back to deriving from the fields, for an entry assembled directly
+	// rather than by the parser. The empty-value skip matters here for the same
+	// reason it does in parseJSONMessage: taking the first alias merely present
+	// let {"message":"","msg":"..."} render blank.
+	for _, name := range jsonMessageFields {
+		if v, ok := fieldValue(entry.Fields, name); ok {
+			if s := stringValue(v); s != "" {
+				return terminal.Sanitize(s)
+			}
+		}
 	}
 	return ""
 }
@@ -267,10 +356,21 @@ func containsAttentionText(value string) bool {
 		strings.Contains(lowerValue, "warn")
 }
 
-func formatSortedFields(fields map[string]any) []string {
+// formatSortedFields renders the structured fields, skipping those already shown
+// elsewhere on the line.
+//
+// suppressLogger, when non-empty, is the label being displayed in brackets; the
+// field that produced it is skipped so it is not printed twice. It is matched by
+// value as well as by key name, and only the JSON path passes it — the logfmt
+// path never renders a logger bracket, so blanket-excluding the logger keys
+// there would delete a field the user can currently see (component=storage).
+func formatSortedFields(fields map[string]any, suppressLogger string) []string {
 	formattedFields := make([]string, 0, len(fields))
 	for _, key := range sortedKeys(fields) {
-		if jsonFormattedFieldExclusions[key] || isJSONMessageField(key) {
+		if isInStringSet(jsonFormattedFieldExclusions, key) || isJSONMessageField(key) {
+			continue
+		}
+		if suppressLogger != "" && keyIn(key, loggerKeys) && stringValue(fields[key]) == suppressLogger {
 			continue
 		}
 		formattedFields = append(formattedFields, fmt.Sprintf("%s=%s",
@@ -281,7 +381,7 @@ func formatSortedFields(fields map[string]any) []string {
 }
 
 func isJSONMessageField(field string) bool {
-	return jsonMessageFieldSet[field]
+	return isInStringSet(jsonMessageFieldSet, field)
 }
 
 // sortedKeys deliberately avoids slices.Sorted(maps.Keys(...)): the iterator

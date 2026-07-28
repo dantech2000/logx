@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"regexp"
@@ -115,7 +116,7 @@ func (p *Pipeline) ProcessLine(rawLine string) (string, bool) {
 		// In stats mode the digest is the output; suppress the per-line render.
 		return "", false
 	}
-	return p.render(entry), true
+	return p.render(entry)
 }
 
 // keep reports whether an entry passes all configured filters. Level filtering
@@ -126,13 +127,25 @@ func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
 	if entry.Level < p.opts.MinLevel {
 		return false
 	}
-	if len(p.opts.Include) > 0 && !matchesAny(p.opts.Include, rawLine) {
+	return p.opts.MatchesContent(entry, rawLine)
+}
+
+// MatchesContent reports whether an entry passes the content filters — Include
+// (logical OR), then Exclude, then every Where predicate (AND). Level filtering
+// is deliberately not included: callers apply their own level floor, and the
+// timeline in particular tracks it separately from these options.
+//
+// Exported so the --timeline view filters identically to the main pipeline
+// rather than reimplementing (or, as it once did, silently skipping) --grep,
+// --exclude, and --where.
+func (o PipelineOptions) MatchesContent(entry LogEntry, rawLine string) bool {
+	if len(o.Include) > 0 && !matchesAny(o.Include, rawLine) {
 		return false
 	}
-	if matchesAny(p.opts.Exclude, rawLine) {
+	if matchesAny(o.Exclude, rawLine) {
 		return false
 	}
-	for _, pred := range p.opts.Where {
+	for _, pred := range o.Where {
 		if !pred.Eval(entry) {
 			return false
 		}
@@ -143,24 +156,32 @@ func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
 // render turns a kept entry into its output line: either the full formatted line
 // or, when Fields is set, a projection of just those keys. Match highlighting is
 // applied last so it works in both modes.
-func (p *Pipeline) render(entry LogEntry) string {
+//
+// It reports false when a projection resolved none of the requested keys, so the
+// entry is skipped rather than emitted as an empty line (text) or a bare "{}"
+// (JSON) — `--fields user` over logs that carry no user field produced one
+// content-free record per line.
+func (p *Pipeline) render(entry LogEntry) (string, bool) {
 	if p.opts.Output == OutputJSON {
 		if len(p.fields) > 0 {
 			return marshalProjectedJSON(entry, p.fields)
 		}
-		return MarshalEntryJSON(entry)
+		return MarshalEntryJSON(entry), true
 	}
 
 	var out string
 	if len(p.fields) > 0 {
 		out = formatProjectedEntry(entry, p.fields)
+		if out == "" {
+			return "", false
+		}
 	} else {
 		out = FormatLogEntry(entry)
 	}
 	if p.opts.Highlight && len(p.opts.Include) > 0 {
 		out = highlightMatches(out, p.opts.Include)
 	}
-	return out
+	return out, true
 }
 
 // matchesAny reports whether s matches any of the patterns.
@@ -176,9 +197,19 @@ func matchesAny(patterns []*regexp.Regexp, s string) bool {
 // Run reads newline-delimited lines from r, processes each, and writes the
 // emitted lines to w. It uses the bounded LineReader, so an over-long line is
 // truncated rather than aborting the stream.
-func (p *Pipeline) Run(r io.Reader, w io.Writer) error {
+//
+// It stops early when ctx is cancelled and returns ctx.Err(). Without that check
+// the loop was uninterruptible: signal.NotifyContext removes the process's
+// default kill-on-SIGINT behavior, so a Ctrl-C during a long `logx parse` was
+// caught, cancelled a context nobody observed, and left no way to stop the run.
+func (p *Pipeline) Run(ctx context.Context, r io.Reader, w io.Writer) error {
 	scanner := NewLineReader(r)
 	for scanner.Scan() {
+		// Checked per line rather than per byte: lines are bounded at 1 MiB, so
+		// this bounds the response to a cancellation without measurable cost.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		out, ok := p.ProcessLine(scanner.Text())
 		if !ok {
 			continue

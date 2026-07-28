@@ -441,7 +441,10 @@ func TestFilterAndFormatLogsUsesSharedFormatter(t *testing.T) {
 	}
 
 	got := buf.String()
-	if !strings.Contains(got, "[2026-05-20 20:37:54] [INFO]") || !strings.Contains(got, "started") || !strings.Contains(got, "component=api") {
+	// "component" is one of the logger keys, so it is surfaced as the bracketed
+	// label rather than repeated as an ordinary field — the same treatment the
+	// message, level, and timestamp already get.
+	if !strings.Contains(got, "[2026-05-20 20:37:54] [INFO]") || !strings.Contains(got, "started") || !strings.Contains(got, "[api]") {
 		t.Fatalf("FilterAndFormatLogs output did not use shared formatter: %q", got)
 	}
 }

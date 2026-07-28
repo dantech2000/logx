@@ -95,6 +95,30 @@ type FieldPredicate struct {
 	hasLevel bool
 	re       *regexp.Regexp
 	kind     fieldKind
+	ts       time.Time
+	hasTS    bool
+}
+
+// predicateTimeFormats are the layouts accepted for a timestamp literal in a
+// --where expression, in addition to the parser's own timeFormats. A bare date
+// is included so `ts>=2026-06-24` works without spelling out a time.
+var predicateTimeFormats = []string{
+	"2006-01-02",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04",
+}
+
+// parsePredicateTime parses a timestamp literal for a ts comparison.
+func parsePredicateTime(val string) (time.Time, bool) {
+	if t, err := parseTimestamp(val); err == nil {
+		return t, true
+	}
+	for _, layout := range predicateTimeFormats {
+		if t, err := time.Parse(layout, val); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // ParseFieldPredicate parses an expression like "status>=500", "path~=/api", or
@@ -132,6 +156,9 @@ func ParseFieldPredicate(expr string) (FieldPredicate, error) {
 			if lvl, err := ParseLogLevel(val); err == nil {
 				fp.level, fp.hasLevel = lvl, true
 			}
+		}
+		if fp.kind == fieldKindTimestamp {
+			fp.ts, fp.hasTS = parsePredicateTime(val)
 		}
 	}
 	return fp, nil
@@ -180,6 +207,16 @@ func (fp FieldPredicate) Eval(entry LogEntry) bool {
 	if fp.kind == fieldKindLevel {
 		return fp.evalLevel(entry.Level)
 	}
+	// Timestamp comparisons are chronological. Falling through to the generic
+	// path compared an RFC3339 string against a non-numeric literal, so
+	// compareNumeric bailed out and `ts>=...` — a documented feature — silently
+	// matched nothing. ~= still matches against the formatted string.
+	if fp.kind == fieldKindTimestamp && fp.hasTS && fp.op != opMatch {
+		if entry.Timestamp.IsZero() {
+			return fp.op == opNeq
+		}
+		return compareOrdered(fp.op, entry.Timestamp.UTC().UnixNano(), fp.ts.UTC().UnixNano())
+	}
 
 	raw, ok := fp.resolveValue(entry)
 	if !ok {
@@ -200,15 +237,38 @@ func (fp FieldPredicate) Eval(entry LogEntry) bool {
 	}
 }
 
-// equals compares numerically when both sides are numeric (so 500 == 500.0),
-// otherwise by exact string.
+// equals compares by exact string first, then numerically so 500 still equals
+// 500.0. The string comparison leads because it is both the common case (a JSON
+// number stringifies to its plain form, and logfmt values are already strings)
+// and the safe one: coercing first made numeric-looking identifiers collide.
 func (fp FieldPredicate) equals(str string) bool {
-	if fp.hasNum {
-		if n, err := strconv.ParseFloat(strings.TrimSpace(str), 64); err == nil {
-			return n == fp.num
-		}
+	str = strings.TrimSpace(str)
+	if str == fp.val {
+		return true
 	}
-	return str == fp.val
+	// A leading zero marks an identifier — a zero-padded account or request ID —
+	// rather than a quantity. Coercing it made account==0123 match 123, 123.0,
+	// and 1.23e2 alike.
+	if !fp.hasNum || hasLeadingZero(str) || hasLeadingZero(fp.val) {
+		return false
+	}
+	// Integers are compared as integers so that a 19-digit trace or span ID is
+	// not collapsed by float64's 53-bit mantissa, where ...992 and ...993 are the
+	// same value and a predicate would match the wrong span.
+	if a, err := strconv.ParseInt(str, 10, 64); err == nil {
+		b, berr := strconv.ParseInt(fp.val, 10, 64)
+		return berr == nil && a == b
+	}
+	n, err := strconv.ParseFloat(str, 64)
+	return err == nil && n == fp.num
+}
+
+// hasLeadingZero reports whether s is a zero-padded integer such as "0123",
+// which identifies a value as an identifier rather than a number. "0" and "0.5"
+// are ordinary numbers and are not treated as padded.
+func hasLeadingZero(s string) bool {
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "-"), "+")
+	return len(s) > 1 && s[0] == '0' && s[1] != '.'
 }
 
 // compareOrdered evaluates a ==, !=, >, >=, <, or <= comparison between two
@@ -282,6 +342,17 @@ func resolveByKind(entry LogEntry, kind fieldKind, key string) (any, bool) {
 		}
 		return entry.RawLine, entry.RawLine != ""
 	case fieldKindLogger:
+		// A field literally named logger/component/source in the line wins over
+		// entry.Logger, which is only a guessed display label and is often derived
+		// from a different key entirely. Without this, a log carrying its own
+		// "source" field could not be filtered on at all: `source==kafka` compared
+		// against the guessed label and never matched, while `source==logrus`
+		// matched every line.
+		if entry.Fields != nil {
+			if v, ok := fieldValue(entry.Fields, key); ok {
+				return v, true
+			}
+		}
 		return entry.Logger, entry.Logger != ""
 	case fieldKindTimestamp:
 		if entry.Timestamp.IsZero() {

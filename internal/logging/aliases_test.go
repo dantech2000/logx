@@ -10,6 +10,10 @@ func restoreFieldAliases(t *testing.T) {
 	message := append([]string(nil), jsonMessageFields...)
 	timeF := append([]string(nil), jsonTimeFields...)
 	excl := jsonFormattedFieldExclusions
+	// jsonMessageFieldSet is rebuilt by RegisterFieldAliases too. Omitting it here
+	// leaked registered message aliases into every later test in the package,
+	// which showed up as a nondeterministic failure elsewhere.
+	msgSet := jsonMessageFieldSet
 	lfLevel := append([]string(nil), logfmtLevelFields...)
 	lfMessage := append([]string(nil), logfmtMessageFields...)
 	lfTime := append([]string(nil), logfmtTimeFields...)
@@ -18,6 +22,7 @@ func restoreFieldAliases(t *testing.T) {
 		jsonMessageFields = message
 		jsonTimeFields = timeF
 		jsonFormattedFieldExclusions = excl
+		jsonMessageFieldSet = msgSet
 		logfmtLevelFields = lfLevel
 		logfmtMessageFields = lfMessage
 		logfmtTimeFields = lfTime

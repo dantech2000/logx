@@ -31,9 +31,46 @@ func (yamlFlowParser) Parse(line string) (LogEntry, bool) {
 	if !hasAnyField(data, jsonLevelFields) && !hasAnyField(data, jsonMessageFields) {
 		return LogEntry{}, false
 	}
+	// yaml.v2 decodes nested maps as map[interface{}]interface{} even when the top
+	// level is typed map[string]any. json.Marshal cannot encode that key type, so
+	// an entry with any nested map failed to marshal and --output json emitted a
+	// bare "{}" for the whole line. Normalizing here also makes dot-path --where
+	// and --fields work, and keeps Go's map[...] syntax out of text output.
+	normalizeYAMLMaps(data)
+
 	// A YAML flow map is JSON-equivalent for our purposes, so reuse the JSON
 	// field extraction (level/message/timestamp/logger).
 	return parseJSONLog(trimmed, data), true
+}
+
+// normalizeYAMLMaps rewrites every nested map[interface{}]interface{} produced by
+// yaml.v2 into a map[string]any, in place, so the result is JSON-encodable and
+// indistinguishable from the same document parsed as JSON.
+func normalizeYAMLMaps(data map[string]any) {
+	for k, v := range data {
+		data[k] = normalizeYAMLValue(v)
+	}
+}
+
+func normalizeYAMLValue(v any) any {
+	switch typed := v.(type) {
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for k, val := range typed {
+			out[stringValue(k)] = normalizeYAMLValue(val)
+		}
+		return out
+	case map[string]any:
+		normalizeYAMLMaps(typed)
+		return typed
+	case []any:
+		for i, item := range typed {
+			typed[i] = normalizeYAMLValue(item)
+		}
+		return typed
+	default:
+		return v
+	}
 }
 
 // --- XML elements: <log level="ERROR" ts="...">message</log> --------------
@@ -70,7 +107,10 @@ func (xmlLogParser) Parse(line string) (LogEntry, bool) {
 		return LogEntry{}, false
 	}
 
-	entry := LogEntry{Format: FormatLogfmt, Fields: fields, RawLine: line}
+	// Level defaults to DEBUG to match every other parser's undetected-level
+	// default. Leaving it as the zero value would mean TRACE, which sits below
+	// the default --level and would hide every XML line lacking a level attribute.
+	entry := LogEntry{Level: DEBUG, Format: FormatLogfmt, Fields: fields, RawLine: line}
 	if level, ok := parseJSONLevel(fields); ok {
 		entry.Level, entry.LevelDetected = level, true
 	}
