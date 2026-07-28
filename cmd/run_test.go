@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -206,5 +208,38 @@ func TestRunLogsValidatesFlagsBeforeClientBuild(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--timeline cannot be used with --follow") {
 		t.Fatalf("runLogs() error = %v, want the --timeline/--follow usage error", err)
+	}
+}
+
+// TestIsCleanCancellation pins that only a genuine cancellation is suppressed.
+// The original check tested only that the context was cancelled, so once a
+// signal had been seen every subsequent failure — a truncated read, a failed
+// fetch — was reported as exit 0. A log tool claiming success on a failed fetch
+// is the worst possible lie to tell a user debugging an incident.
+func TestIsCleanCancellation(t *testing.T) {
+	realFailure := errors.New("device read error")
+
+	tests := []struct {
+		name   string
+		err    error
+		ctxErr error
+		want   bool
+	}{
+		{"cancelled run", context.Canceled, context.Canceled, true},
+		{"wrapped cancellation", fmt.Errorf("error fetching logs: %w", context.Canceled), context.Canceled, true},
+		{"deadline exceeded", context.DeadlineExceeded, context.DeadlineExceeded, true},
+		{"real failure after a signal", realFailure, context.Canceled, false},
+		{"wrapped real failure after a signal", fmt.Errorf("read: %w", realFailure), context.Canceled, false},
+		{"real failure, no signal", realFailure, nil, false},
+		{"success", nil, nil, false},
+		{"success after a signal", nil, context.Canceled, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCleanCancellation(tc.err, tc.ctxErr); got != tc.want {
+				t.Fatalf("isCleanCancellation(%v, %v) = %v, want %v", tc.err, tc.ctxErr, got, tc.want)
+			}
+		})
 	}
 }

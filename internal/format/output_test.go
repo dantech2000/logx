@@ -121,13 +121,28 @@ func TestOutputFormatterSanitizesMachineOutput(t *testing.T) {
 	formatter := NewOutputFormatter("pod", "ns", []kubernetes.ContainerInfo{
 		{Name: "app", Ready: true, Status: "Running", Image: evil},
 	})
-	for _, format := range []string{"json", "yaml", "posix", "table"} {
+	// "" selects the table; the others are the machine-readable formats.
+	for _, format := range []string{"json", "yaml", "posix", ""} {
 		out, err := formatter.FormatOutput(format)
 		if err != nil {
 			t.Fatalf("FormatOutput(%q) error = %v", format, err)
 		}
 		if strings.Contains(out, "\x1b") {
 			t.Fatalf("format %q leaked raw escape byte: %q", format, out)
+		}
+	}
+}
+
+// TestOutputFormatterRejectsUnknownFormat pins that a bad -o value is an error
+// rather than a silent fall-through to the table. `logx containers pod -o jsonn`
+// used to exit 0 with ANSI-colored table text, which breaks any caller piping to
+// jq. "text" is included because it is valid on `logs`/`parse`, which share the
+// -o shorthand, making it the most likely wrong value to land here.
+func TestOutputFormatterRejectsUnknownFormat(t *testing.T) {
+	formatter := NewOutputFormatter("pod", "ns", []kubernetes.ContainerInfo{{Name: "app"}})
+	for _, format := range []string{"text", "table", "JSON", "yml", "ndjson", "totally-bogus"} {
+		if _, err := formatter.FormatOutput(format); err == nil {
+			t.Errorf("FormatOutput(%q) returned no error; unknown formats must not silently render a table", format)
 		}
 	}
 }

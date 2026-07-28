@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,14 +59,36 @@ func Execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Restore the default signal disposition as soon as the first signal arrives.
+	// signal.NotifyContext takes over SIGINT/SIGTERM for the whole process, and
+	// its watcher goroutine exits after one signal — so without this a second
+	// Ctrl-C was dropped on the floor and the process could only be killed with
+	// SIGQUIT/SIGKILL. Now the first signal asks for a graceful stop and a second
+	// terminates immediately, which is what users expect when something is stuck.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
 	err := rootCmd.ExecuteContext(ctx)
-	// If the run was interrupted by a signal (e.g. Ctrl-C on a --follow stream),
-	// treat it as a clean cancellation rather than reporting the resulting
-	// "context canceled" error and exiting non-zero.
-	if err != nil && ctx.Err() != nil {
+	if isCleanCancellation(err, ctx.Err()) {
 		return nil
 	}
 	return err
+}
+
+// isCleanCancellation reports whether err should be treated as a clean exit
+// because the run was interrupted by a signal.
+//
+// Both conditions matter. ctxErr proves a signal actually arrived, and err must
+// itself be the cancellation: the original check tested only ctxErr != nil, so
+// once Ctrl-C had been pressed *any* subsequent failure — a truncated read, a
+// failed fetch — was swallowed and reported as success.
+func isCleanCancellation(err, ctxErr error) bool {
+	if err == nil || ctxErr == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func init() {

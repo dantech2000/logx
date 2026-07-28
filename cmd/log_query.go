@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/dantech2000/logx/internal/kubernetes"
@@ -49,10 +50,14 @@ func applySince(since string, lf *kubernetes.LogFetcher) error {
 		return nil
 	}
 	if d, derr := time.ParseDuration(since); derr == nil {
-		secs := int64(d.Seconds())
-		if secs <= 0 {
+		if d <= 0 {
 			return fmt.Errorf("--since duration must be positive, got %q", since)
 		}
+		// The API takes whole seconds, so round up rather than truncating: a
+		// sub-second window truncated to 0 was rejected as "not positive" even
+		// though it was, and 1500ms silently dropped half a second of logs.
+		// Rounding up can only widen the window, never hide a line.
+		secs := int64(math.Ceil(d.Seconds()))
 		lf.SinceSeconds = &secs
 		return nil
 	}

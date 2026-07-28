@@ -67,9 +67,17 @@ func NewOutputFormatter(podName, namespace string, containers []kubernetes.Conta
 	}
 }
 
-// FormatOutput formats the output based on the specified format
+// FormatOutput formats the output based on the specified format. An empty format
+// selects the human-readable table.
+//
+// An unrecognized format is an error rather than a silent fall-through to the
+// table: `logx containers pod -o jsonn | jq` previously exited 0 having emitted
+// ANSI-colored table text, and a mistyped or wrong-command value (`-o text`,
+// which is valid on `logs`, or `-o JSON`) failed the same silent way.
 func (of *OutputFormatter) FormatOutput(format string) (string, error) {
 	switch format {
+	case "":
+		return ContainerList(of.PodName, of.Namespace, of.Containers), nil
 	case "json":
 		return of.formatJSON()
 	case "yaml":
@@ -77,7 +85,7 @@ func (of *OutputFormatter) FormatOutput(format string) (string, error) {
 	case "posix":
 		return of.formatPOSIX()
 	default:
-		return ContainerList(of.PodName, of.Namespace, of.Containers), nil
+		return "", fmt.Errorf("unknown output format %q (valid: json, yaml, posix, or omit for a table)", format)
 	}
 }
 

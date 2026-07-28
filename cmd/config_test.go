@@ -23,14 +23,22 @@ func TestConfigPathPrecedence(t *testing.T) {
 	// $LOGX_CONFIG wins outright.
 	t.Setenv("LOGX_CONFIG", "/explicit/config.yaml")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
-	if got := configPath(); got != "/explicit/config.yaml" {
+	got, explicit := configPath()
+	if got != "/explicit/config.yaml" {
 		t.Errorf("configPath() = %q, want $LOGX_CONFIG to win", got)
+	}
+	if !explicit {
+		t.Error("a path from $LOGX_CONFIG must be reported as explicit")
 	}
 
 	// Without it, $XDG_CONFIG_HOME/logx/config.yaml.
 	t.Setenv("LOGX_CONFIG", "")
-	if got, want := configPath(), filepath.Join("/xdg", "logx", "config.yaml"); got != want {
+	got, explicit = configPath()
+	if want := filepath.Join("/xdg", "logx", "config.yaml"); got != want {
 		t.Errorf("configPath() = %q, want %q (from $XDG_CONFIG_HOME)", got, want)
+	}
+	if explicit {
+		t.Error("a default location must not be reported as explicit")
 	}
 
 	// Without either, ~/.config/logx/config.yaml.
@@ -39,8 +47,12 @@ func TestConfigPathPrecedence(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home directory available: %v", err)
 	}
-	if got, want := configPath(), filepath.Join(home, ".config", "logx", "config.yaml"); got != want {
+	got, explicit = configPath()
+	if want := filepath.Join(home, ".config", "logx", "config.yaml"); got != want {
 		t.Errorf("configPath() = %q, want %q (home fallback)", got, want)
+	}
+	if explicit {
+		t.Error("the home fallback must not be reported as explicit")
 	}
 }
 
@@ -86,16 +98,12 @@ func TestLoadConfigValid(t *testing.T) {
 	}
 }
 
-func TestLoadConfigMissingIsNotError(t *testing.T) {
-	t.Setenv("LOGX_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("missing config should not error, got %v", err)
-	}
-	if cfg.Level != "" {
-		t.Fatalf("expected empty config, got %+v", cfg)
-	}
-}
+// A missing-config test lived here that pointed $LOGX_CONFIG at an absent file
+// and asserted no error. It used an explicitly-named path to stand in for "no
+// config at all" — the very conflation that let a mistyped $LOGX_CONFIG be
+// silently ignored. TestLoadConfigMissingFile below replaces it and covers both
+// halves separately: absent default location (inert) and absent explicit path
+// (an error).
 
 func TestLoadConfigMalformedErrors(t *testing.T) {
 	writeConfig(t, "level: WARN\n\tbad: : :\n")
@@ -154,4 +162,45 @@ func TestEffectiveLevelUsesConfigThenFlag(t *testing.T) {
 	if got, _ := effectiveLevel(c); got != "ERROR" {
 		t.Errorf("effectiveLevel = %q, want ERROR (explicit flag)", got)
 	}
+}
+
+// TestLoadConfigMissingFile pins the difference between "no config" and "the
+// config you asked for is not there". A missing file at the default location is
+// the ordinary no-config case, but $LOGX_CONFIG naming a file that does not
+// exist was silently ignored — so a typo in the path meant logx ran with none of
+// the settings the user believed were applied, and said nothing.
+func TestLoadConfigMissingFile(t *testing.T) {
+	t.Run("explicit LOGX_CONFIG that is missing is an error", func(t *testing.T) {
+		t.Setenv("LOGX_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("a missing explicitly-named config must be reported, not ignored")
+		}
+	})
+
+	t.Run("missing default location is not an error", func(t *testing.T) {
+		t.Setenv("LOGX_CONFIG", "")
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("absent default config must be inert, got %v", err)
+		}
+		if cfg.Level != "" || cfg.Theme != "" {
+			t.Fatalf("expected an empty config, got %+v", cfg)
+		}
+	})
+
+	t.Run("explicit LOGX_CONFIG that exists still loads", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte("level: WARN\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		t.Setenv("LOGX_CONFIG", path)
+		cfg, err := loadConfig()
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		if cfg.Level != "WARN" {
+			t.Fatalf("level = %q, want WARN", cfg.Level)
+		}
+	})
 }

@@ -22,6 +22,8 @@ type logOptions struct {
 	podName        string
 	previous       bool
 	timeline       bool
+	fields         []string
+	output         string
 }
 
 var logsCmd = &cobra.Command{
@@ -46,7 +48,7 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.Flags().String(flagSelector, "", "Label selector (e.g. app=api); streams logs from all matching pods")
 	cmd.Flags().BoolP(flagAllNamespaces, "A", false, "With --selector, match pods across all namespaces")
 	cmd.Flags().BoolP(flagAllContainers, "a", false, "Stream logs from all containers in the pod, prefixed by container name")
-	cmd.Flags().Int(flagMaxConcurrency, 10, "Max container log streams read at once with --all-containers/--selector")
+	cmd.Flags().Int(flagMaxConcurrency, kubernetes.DefaultMaxConcurrency, "Max container log streams read at once with --all-containers/--selector")
 	cmd.Flags().BoolP(flagFollow, "f", false, "Follow the log output in real-time")
 	cmd.Flags().BoolP(flagPrevious, "p", false, "Get previous terminated container logs")
 	cmd.Flags().Bool(flagTimeline, false, "Show pod logs and Kubernetes events together sorted by time")
@@ -145,6 +147,16 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		return nil, err
 	}
 
+	fields, err := cmd.Flags().GetStringSlice(flagFields)
+	if err != nil {
+		return nil, err
+	}
+
+	output, err := getStringFlag(cmd, flagOutput)
+	if err != nil {
+		return nil, err
+	}
+
 	podName := ""
 	if len(args) > 0 {
 		podName = args[0]
@@ -161,6 +173,8 @@ func getLogOptions(cmd *cobra.Command, args []string) (*logOptions, error) {
 		podName:        podName,
 		previous:       previous,
 		timeline:       timeline,
+		fields:         fields,
+		output:         output,
 	}, nil
 }
 
@@ -225,21 +239,28 @@ func runLogs(cmd *cobra.Command, args []string) error {
 }
 
 // validateLogOptions rejects mutually exclusive or incomplete flag combinations.
+// The checks are grouped by the flag they hang off so each group stays readable
+// as new flags are added.
 func validateLogOptions(o *logOptions) error {
+	for _, check := range []func(*logOptions) error{
+		validateTargetSelection,
+		validateTimelineCombinations,
+		validatePreviousCombinations,
+	} {
+		if err := check(o); err != nil {
+			return err
+		}
+	}
+	if o.maxConcurrency < 1 {
+		return errors.New("--max-concurrency must be at least 1")
+	}
+	return nil
+}
+
+// validateTargetSelection checks that exactly one log target is identified.
+func validateTargetSelection(o *logOptions) error {
 	if o.podName == "" && o.selector == "" {
 		return errors.New("provide a pod name or use --selector")
-	}
-	if o.timeline && o.follow {
-		return errors.New("--timeline cannot be used with --follow")
-	}
-	if o.allContainers && o.container != "" {
-		return errors.New("--all-containers cannot be combined with --container")
-	}
-	if o.allContainers && o.timeline {
-		return errors.New("--all-containers cannot be combined with --timeline")
-	}
-	if o.selector != "" && o.timeline {
-		return errors.New("--selector cannot be combined with --timeline")
 	}
 	if o.selector != "" && o.podName != "" {
 		return errors.New("provide either a pod name or --selector, not both")
@@ -247,11 +268,59 @@ func validateLogOptions(o *logOptions) error {
 	if o.allNamespaces && o.selector == "" {
 		return errors.New("--all-namespaces requires --selector")
 	}
-	if o.stats && o.timeline {
+	if o.allContainers && o.container != "" {
+		return errors.New("--all-containers cannot be combined with --container")
+	}
+	return nil
+}
+
+// validateTimelineCombinations rejects the flags --timeline cannot honor.
+//
+// The timeline interleaves two different record types (log lines and cluster
+// events) in one fixed rendering, so the flags that replace that rendering have
+// nothing to act on. Rejecting them beats the previous silent no-op, which
+// exited 0 having ignored what the user asked for. Content filters
+// (--grep/--exclude/--where) do apply and are handled by the timeline's log
+// collector.
+func validateTimelineCombinations(o *logOptions) error {
+	if !o.timeline {
+		return nil
+	}
+	if o.follow {
+		return errors.New("--timeline cannot be used with --follow")
+	}
+	if o.allContainers {
+		return errors.New("--all-containers cannot be combined with --timeline")
+	}
+	if o.selector != "" {
+		return errors.New("--selector cannot be combined with --timeline")
+	}
+	if o.stats {
 		return errors.New("--stats cannot be combined with --timeline")
 	}
-	if o.maxConcurrency < 1 {
-		return errors.New("--max-concurrency must be at least 1")
+	if len(o.fields) > 0 {
+		return errors.New("--fields cannot be combined with --timeline")
+	}
+	if o.output != "" && o.output != "text" {
+		return fmt.Errorf("--output %s cannot be combined with --timeline", o.output)
+	}
+	return nil
+}
+
+// validatePreviousCombinations requires --previous to have a single target.
+//
+// -p asks for one container's prior instance, but the fan-out paths never run
+// the -p precondition check, so every stream was stamped Previous:true and any
+// container that had not restarted failed the whole command with a raw API error.
+func validatePreviousCombinations(o *logOptions) error {
+	if !o.previous {
+		return nil
+	}
+	if o.allContainers {
+		return errors.New("--previous cannot be combined with --all-containers; select one container with --container")
+	}
+	if o.selector != "" {
+		return errors.New("--previous cannot be combined with --selector; select one pod and container")
 	}
 	return nil
 }
