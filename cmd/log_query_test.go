@@ -99,3 +99,44 @@ func TestApplyLogQueryTailAllByDefault(t *testing.T) {
 		t.Errorf("default --tail should leave TailLines nil (all), got %v", *lf.TailLines)
 	}
 }
+
+// TestApplySinceSubSecondDurations pins that a sub-second --since is accepted
+// and rounded up. Truncating to whole seconds rejected "500ms" with the
+// self-contradicting "duration must be positive", and silently narrowed
+// "1500ms" to one second, dropping half a second of logs. Rounding up can only
+// widen the window, never hide a line.
+func TestApplySinceSubSecondDurations(t *testing.T) {
+	tests := []struct {
+		since string
+		want  int64
+	}{
+		{"500ms", 1},
+		{"1500ms", 2},
+		{"1.9s", 2},
+		{"5m", 300},
+		{"1s", 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.since, func(t *testing.T) {
+			var lf kubernetes.LogFetcher
+			if err := applySince(tc.since, &lf); err != nil {
+				t.Fatalf("applySince(%q) error: %v", tc.since, err)
+			}
+			if lf.SinceSeconds == nil {
+				t.Fatalf("applySince(%q) left SinceSeconds nil", tc.since)
+			}
+			if *lf.SinceSeconds != tc.want {
+				t.Fatalf("applySince(%q) = %d, want %d", tc.since, *lf.SinceSeconds, tc.want)
+			}
+		})
+	}
+
+	// A genuinely non-positive duration is still rejected.
+	for _, bad := range []string{"0s", "-5m"} {
+		var lf kubernetes.LogFetcher
+		if err := applySince(bad, &lf); err == nil {
+			t.Errorf("applySince(%q) should have been rejected", bad)
+		}
+	}
+}

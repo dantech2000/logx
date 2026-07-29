@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -62,10 +63,13 @@ func TestMarshalEntryJSONEscapesControlBytes(t *testing.T) {
 }
 
 func TestMarshalProjectedJSON(t *testing.T) {
-	out := marshalProjectedJSON(
+	out, ok := marshalProjectedJSON(
 		ParseLogEntry(`{"level":"warn","status":404,"path":"/x","msg":"nope"}`),
 		classifyFields([]string{"level", "status", "missing"}),
 	)
+	if !ok {
+		t.Fatal("projection with resolvable keys should be emitted")
+	}
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(out), &obj); err != nil {
 		t.Fatalf("invalid JSON: %v (%s)", err, out)
@@ -84,7 +88,7 @@ func TestMarshalProjectedJSON(t *testing.T) {
 func TestPipelineJSONOutputIsNDJSON(t *testing.T) {
 	var buf strings.Builder
 	in := "INFO one\nWARN two\n"
-	if err := NewPipeline(PipelineOptions{MinLevel: TRACE, Output: OutputJSON}).Run(strings.NewReader(in), &buf); err != nil {
+	if err := NewPipeline(PipelineOptions{MinLevel: TRACE, Output: OutputJSON}).Run(context.Background(), strings.NewReader(in), &buf); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")

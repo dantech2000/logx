@@ -174,6 +174,13 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 		if entry.Level < lf.FilterLevel {
 			continue
 		}
+		// Content filters (--grep/--exclude/--where) apply to the log portion of
+		// the timeline exactly as they do to a plain log fetch. The level floor is
+		// checked against lf.FilterLevel above rather than through the options, so
+		// a caller that sets only FilterLevel keeps working.
+		if !lf.Filters.MatchesContent(entry, rawLine) {
+			continue
+		}
 		items = append(items, timelineItem{
 			timestamp: entry.Timestamp,
 			line:      formatTimelineLog(entry),
@@ -204,7 +211,14 @@ func (lf *LogFetcher) collectEventTimelineItems(ctx context.Context) ([]timeline
 	for _, event := range events.Items {
 		// Guard client-side as well: not every API server (or test fake) enforces
 		// the field selector, so we never surface another object's events here.
+		// The kind is checked too — the selector matches on name alone, and a
+		// Service, Deployment, or PVC sharing the pod's name is common, which
+		// leaked their events into a view documented as the pod's own. An empty
+		// kind is accepted so a fake or older API server that omits it still works.
 		if event.InvolvedObject.Name != lf.PodName {
+			continue
+		}
+		if kind := event.InvolvedObject.Kind; kind != "" && kind != "Pod" {
 			continue
 		}
 		timelineEvent := newTimelineEvent(event)

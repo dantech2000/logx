@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -79,6 +80,20 @@ func buildPipelineOptions(cmd *cobra.Command, minLevel logging.LogLevel) (loggin
 	opts.CollectStats, err = cmd.Flags().GetBool(flagStats)
 	if err != nil {
 		return opts, err
+	}
+
+	// --stats replaces per-line output with a human-readable text digest, so the
+	// flags that shape per-line rendering have nothing to act on. They were
+	// silently ignored: `logx parse -o json --stats | jq` printed the box-drawing
+	// digest to stdout and exited 0, breaking the pipeline with no explanation.
+	// Every other incompatible pairing is rejected, so this matches.
+	if opts.CollectStats {
+		if opts.Output != logging.OutputText {
+			return opts, fmt.Errorf("--stats cannot be combined with --output %s (the digest is a text summary)", outStr)
+		}
+		if len(opts.Fields) > 0 {
+			return opts, errors.New("--fields cannot be combined with --stats (the digest replaces per-line output)")
+		}
 	}
 
 	return opts, nil

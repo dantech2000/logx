@@ -52,7 +52,7 @@ func runParse(cmd *cobra.Command, args []string) error {
 	defer closeFn()
 
 	pipeline := logging.NewPipeline(opts)
-	if err := pipeline.Run(reader, cmd.OutOrStdout()); err != nil {
+	if err := pipeline.Run(cmd.Context(), reader, cmd.OutOrStdout()); err != nil {
 		return err
 	}
 	if stats := pipeline.Stats(); stats != nil {

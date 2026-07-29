@@ -70,6 +70,50 @@ jobs:
         with:
           version: v2.12.2
 
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.5'
+          cache: true
+          cache-dependency-path: go.sum
+
+      # `go test` alone only replays each target's seed corpus. This runs the
+      # targets for real so new inputs are actually explored.
+      #
+      # The budget is a number of executions rather than a wall-clock duration:
+      # with -fuzztime=<seconds> the run fails with "context deadline exceeded" if
+      # the budget expires while a worker is mid-phase, which makes the job flaky
+      # on a loaded runner independently of whether any input actually failed.
+      # A count is deterministic and scales with the runner's speed.
+      #
+      # A real failure writes a testdata/fuzz corpus entry, which the upload step
+      # below captures so the exact input can be replayed locally.
+      - name: Run fuzz targets
+        run: |
+          set -euo pipefail
+          for pkg in $(go list ./...); do
+            for t in $(go test -list '^Fuzz' "$pkg" 2>/dev/null | grep '^Fuzz' || true); do
+              echo "::group::${t} (${pkg})"
+              go test "$pkg" -run "^${t}$" -fuzz "^${t}$" -fuzztime=50000x
+              echo "::endgroup::"
+            done
+          done
+
+      - name: Upload failing corpus
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore
+
   govulncheck:
     name: Vulnerability scan
     runs-on: ubuntu-latest

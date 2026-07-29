@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/AlecAivazis/survey/v2/terminal"
 	"github.com/dantech2000/logx/internal/logging"
+	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -95,6 +97,14 @@ func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 		options[i] = FormatContainerInfo(info)
 	}
 
+	// Prompting only makes sense on an interactive terminal. Without this the
+	// prompt was attempted regardless, failing with a bare "selection failed:
+	// EOF" in scripts and pipelines instead of saying what to do about it.
+	if !stdinIsTerminal() {
+		return "", fmt.Errorf("pod %q has %d containers; specify one with --container (%s)",
+			lf.PodName, containerCount, strings.Join(containerNamesOf(containers), ", "))
+	}
+
 	// Prepare the survey prompt
 	var selectedIdx int
 	prompt := &survey.Select{
@@ -109,8 +119,15 @@ func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 		},
 	}
 
-	// Show the prompt and get user's selection
-	if err := survey.AskOne(prompt, &selectedIdx, survey.WithPageSize(10)); err != nil {
+	// Show the prompt and get user's selection. The prompt is driven on stderr,
+	// not stdout: survey defaults to os.Stdout, which meant the ANSI prompt was
+	// written into redirected output, so `logx logs pod -o json > out.json` put
+	// escape sequences and the menu into out.json.
+	askOpts := []survey.AskOpt{
+		survey.WithPageSize(10),
+		survey.WithStdio(os.Stdin, os.Stderr, os.Stderr),
+	}
+	if err := survey.AskOne(prompt, &selectedIdx, askOpts...); err != nil {
 		if errors.Is(err, terminal.InterruptErr) {
 			return "", errors.New("operation cancelled")
 		}
@@ -120,10 +137,35 @@ func (lf *LogFetcher) selectContainerName(pod *corev1.Pod) (string, error) {
 	return containers[selectedIdx].Name, nil
 }
 
+// stdinIsTerminal reports whether stdin is an interactive terminal rather than a
+// pipe, file, or /dev/null, so the container picker only prompts when someone is
+// actually there to answer.
+//
+// This uses a real terminal check rather than testing os.ModeCharDevice:
+// /dev/null is a character device too, so the mode test reports a terminal for
+// the very redirection this is meant to detect.
+func stdinIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// containerNamesOf extracts the names from container info, for error messages.
+func containerNamesOf(containers []ContainerInfo) []string {
+	names := make([]string, len(containers))
+	for i, c := range containers {
+		names[i] = c.Name
+	}
+	return names
+}
+
 // previousContainerTerminated reports, from an already-fetched pod, whether the
 // named container has restarted — i.e. whether --previous has logs to fetch.
+// It scans init and ephemeral container statuses as well as regular ones, so the
+// set of containers it recognizes matches podHasContainer and the container
+// picker. Checking only regular containers meant `-c init-db -p` was accepted as
+// a valid container and then rejected as nonexistent — while reading a
+// crashlooping init container's prior logs is exactly what -p is for.
 func (lf *LogFetcher) previousContainerTerminated(pod *corev1.Pod, containerName string) (bool, error) {
-	for _, status := range pod.Status.ContainerStatuses {
+	for _, status := range allContainerStatuses(pod) {
 		if status.Name == containerName {
 			return status.RestartCount > 0, nil
 		}

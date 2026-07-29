@@ -168,3 +168,81 @@ func TestLevelFlagHelpListsAllLevels(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateLogOptionsRejectsUnsupportedCombinations pins the flag
+// combinations that used to be accepted and then either failed with a raw API
+// error or silently did nothing.
+func TestValidateLogOptionsRejectsUnsupportedCombinations(t *testing.T) {
+	tests := []struct {
+		name string
+		opts logOptions
+	}{
+		// -p targets one container's prior instance, but the fan-out paths never
+		// run the -p precondition check, so every stream was stamped Previous:true
+		// and any container that had not restarted failed the whole command.
+		{"previous with all-containers", logOptions{podName: "p", previous: true, allContainers: true, maxConcurrency: 10}},
+		{"previous with selector", logOptions{selector: "app=api", previous: true, maxConcurrency: 10}},
+		// --timeline renders two record types in one fixed layout, so the flags
+		// that replace that layout have nothing to act on. They used to be
+		// accepted and silently ignored, exiting 0 with unfiltered output.
+		{"timeline with fields", logOptions{podName: "p", timeline: true, fields: []string{"msg"}, maxConcurrency: 10}},
+		{"timeline with json output", logOptions{podName: "p", timeline: true, output: "json", maxConcurrency: 10}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateLogOptions(&tc.opts); err == nil {
+				t.Fatalf("validateLogOptions(%+v) accepted an unsupported combination", tc.opts)
+			}
+		})
+	}
+
+	// Combinations that must keep working.
+	valid := []logOptions{
+		{podName: "p", previous: true, container: "app", maxConcurrency: 10},
+		{podName: "p", timeline: true, output: "text", maxConcurrency: 10},
+		{podName: "p", timeline: true, maxConcurrency: 10},
+		{podName: "p", allContainers: true, maxConcurrency: 10},
+	}
+	for _, opts := range valid {
+		if err := validateLogOptions(&opts); err != nil {
+			t.Errorf("validateLogOptions(%+v) rejected a valid combination: %v", opts, err)
+		}
+	}
+}
+
+// TestBuildPipelineOptionsRejectsStatsRenderingFlags pins that --stats rejects
+// the flags that shape per-line rendering instead of ignoring them. `logx parse
+// -o json --stats | jq` used to print the box-drawing text digest to stdout and
+// exit 0, breaking the pipeline with no explanation.
+func TestBuildPipelineOptionsRejectsStatsRenderingFlags(t *testing.T) {
+	newCmd := func(args ...string) *cobra.Command {
+		c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
+		addFilterFlags(c)
+		if err := c.ParseFlags(args); err != nil {
+			t.Fatalf("ParseFlags(%v): %v", args, err)
+		}
+		return c
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"json output", []string{"--stats", "--output", "json"}},
+		{"field projection", []string{"--stats", "--fields", "level,msg"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := buildPipelineOptions(newCmd(tc.args...), logging.DEBUG); err == nil {
+				t.Fatalf("buildPipelineOptions(%v) accepted a combination --stats cannot honor", tc.args)
+			}
+		})
+	}
+
+	// --stats on its own, and the rendering flags without --stats, still work.
+	for _, args := range [][]string{{"--stats"}, {"--output", "json"}, {"--fields", "level"}} {
+		if _, err := buildPipelineOptions(newCmd(args...), logging.DEBUG); err != nil {
+			t.Errorf("buildPipelineOptions(%v) rejected a valid combination: %v", args, err)
+		}
+	}
+}

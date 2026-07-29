@@ -121,10 +121,46 @@ var logParsers = []logParser{
 // intentionally differ only in the separator they consume.
 const kubeletTimestampPattern = `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z`
 
+// plainTextTimestampPattern is the shape of a timestamp inside a plain-text log
+// line. Shared by the anchored and unanchored regexes below so they cannot drift.
+const plainTextTimestampPattern = `\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`
+
 var (
 	kubernetesTimestampPrefixRegex = regexp.MustCompile(`^(` + kubeletTimestampPattern + `)\s+(.*)$`)
-	plainTextTimestampRegex        = regexp.MustCompile(`\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
-	plainTextLevelRegex            = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)([^[:alnum:]_]|$)`)
+	// plainTextLeadingTimestampRegex anchors the entry's timestamp to the start of
+	// the line, allowing an optional level token and/or square brackets ahead of
+	// it so both "<time> LEVEL msg" and "LEVEL <time> msg" are recognized.
+	//
+	// Searching the whole line let a date mentioned in prose become the entry's
+	// timestamp — "Scheduled next backup for 2026-12-25" was stamped with a date
+	// six months in the future, which corrupts --timeline ordering, `ts`
+	// predicates, and the .time field of --output json. A real entry timestamp is
+	// a prefix by universal convention; a date further in is content.
+	plainTextLeadingTimestampRegex = regexp.MustCompile(
+		`^[\s\[]*(?:(?i:DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)\]?\s+\[?)?(` +
+			plainTextTimestampPattern + `)`)
+	// Level detection in plain text uses two regexes, because the cost of a
+	// mistake is asymmetric. Reading prose as ERROR or WARN is over-inclusion: the
+	// line is still shown. Reading it as TRACE is the one direction that loses
+	// data, since TRACE sits below the default --level DEBUG — and LevelTracker
+	// then carries that TRACE onto the indented frames beneath it, swallowing an
+	// entire stack trace.
+	//
+	// plainTextLeadingLevelRegex matches a level in the position a real marker
+	// occupies: the head of the line, optionally after a timestamp and/or
+	// brackets, and followed by a separator. Every level, TRACE included, is
+	// trusted here.
+	plainTextLeadingLevelRegex = regexp.MustCompile(
+		`^[\s\[]*(?:` + plainTextTimestampPattern + `)?[\s\]\[]*` +
+			`((?i:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL))(?:[\s\]:]|$)`)
+
+	// plainTextLevelRegex is the fallback scan over the rest of the line, for
+	// lines that name their level mid-message. TRACE is deliberately absent: a
+	// non-leading "trace" is overwhelmingly prose ("stack trace follows", "STACK
+	// TRACE follows", "Blocked TRACE request", "TRACE-ID: ..."), and honoring it
+	// hides the line. Excluding it also lets a genuine level later on such a line
+	// win, instead of losing to a leftmost prose "TRACE".
+	plainTextLevelRegex = regexp.MustCompile(`(^|[^[:alnum:]_])((?i:DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL))([^[:alnum:]_]|$)`)
 	// logfmtKeyRegex matches identifier-like logfmt keys so that tokens such as a
 	// trailing URL ("…/api?foo=bar") are not mistaken for key=value fields.
 	logfmtKeyRegex = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -354,7 +390,27 @@ func klogLevel(letter string) LogLevel {
 	}
 }
 
-// detectLoggerLabel returns a display label for known structured logging formats.
+// jsonLoggerLabel returns the label shown in brackets for a JSON entry.
+//
+// An explicit logger/component/source field is the application's own name for
+// the emitter, and it is what `--where logger==` matches (predicate.go resolves
+// a real field ahead of the virtual key). Displaying detectLoggerLabel's guess
+// instead made the two disagree in the most confusing possible way: the label on
+// screen was not filterable, and the value that *was* filterable never appeared.
+// A line carrying logger="payment-service" rendered as [logrus], and
+// `--where logger==logrus` then matched nothing.
+//
+// The field list is loggerKeys, shared with the predicate engine, so display and
+// filtering cannot drift apart again.
+func jsonLoggerLabel(data map[string]any) string {
+	if s, ok := firstStringField(data, loggerKeys...); ok && s != "" {
+		return s
+	}
+	return detectLoggerLabel(data)
+}
+
+// detectLoggerLabel guesses which logging *library* produced an object from its
+// shape. It is only a fallback for when the line names no logger of its own.
 func detectLoggerLabel(data map[string]any) string {
 	switch {
 	case data["caller"] != nil && data["ts"] != nil:
@@ -387,7 +443,7 @@ func parseTimestamp(timeStr string) (time.Time, error) {
 }
 
 func parseJSONLog(line string, data map[string]any) LogEntry {
-	logger := detectLoggerLabel(data)
+	logger := jsonLoggerLabel(data)
 	entry := LogEntry{
 		Format:  FormatJSON,
 		Fields:  data,
@@ -418,15 +474,26 @@ func parseJSONLevel(data map[string]any) (LogLevel, bool) {
 	return DEBUG, false
 }
 
+// parseJSONMessage picks the message from the first message alias that carries
+// actual text. Taking the first alias merely *present* meant that a line like
+// {"message":"","msg":"database connection refused"} rendered as an empty
+// message: the empty "message" won, and "msg" was then suppressed from the
+// printed fields as already-surfaced. That shape is what log enrichers (Fluent
+// Bit, Vector) produce when they add a normalized key alongside the original, so
+// the result was total content loss on a common pipeline.
 func parseJSONMessage(line string, data map[string]any) string {
 	for _, field := range jsonMessageFields {
 		if val, ok := fieldValue(data, field); ok {
-			return stringValue(val)
+			if s := stringValue(val); s != "" {
+				return s
+			}
 		}
 	}
 
 	if err, ok := data["error"]; ok {
-		return stringValue(err)
+		if s := stringValue(err); s != "" {
+			return s
+		}
 	}
 	return line
 }
@@ -529,7 +596,7 @@ func hasHTTPContext(data map[string]any) bool {
 // the XML/CSV format detectors so both use the same field-presence semantics.
 func hasAnyField(data map[string]any, keys []string) bool {
 	for _, key := range keys {
-		if _, ok := fieldValue(data, key); ok {
+		if _, ok := fieldValueExact(data, key); ok {
 			return true
 		}
 	}
@@ -544,21 +611,32 @@ func parsePlainTextLog(line string) LogEntry {
 		RawLine: line,
 	}
 
-	// First try to extract timestamp
-	timeStr := plainTextTimestampRegex.FindString(line)
+	// Extract the timestamp only from the head of the line, so a date appearing
+	// in the message body is treated as content rather than as the entry's time.
+	timeStr := ""
+	if m := plainTextLeadingTimestampRegex.FindStringSubmatch(line); m != nil {
+		timeStr = m[1]
+	}
 	if timeStr != "" {
 		if ts, err := parseTimestamp(timeStr); err == nil {
 			entry.Timestamp = ts
 		}
 	}
 
-	// Try to extract log level
+	// Try a leading level marker first (trusted for every level), then fall back
+	// to scanning the rest of the line (which never yields TRACE).
 	levelStr := ""
-	if matches := plainTextLevelRegex.FindStringSubmatch(line); matches != nil {
-		if level, err := ParseLogLevel(matches[2]); err == nil {
+	if m := plainTextLeadingLevelRegex.FindStringSubmatch(line); m != nil {
+		levelStr = m[1]
+	} else if m := plainTextLevelRegex.FindStringSubmatch(line); m != nil {
+		levelStr = m[2]
+	}
+	if levelStr != "" {
+		if level, err := ParseLogLevel(levelStr); err == nil {
 			entry.Level = level
 			entry.LevelDetected = true
-			levelStr = matches[2]
+		} else {
+			levelStr = ""
 		}
 	}
 
@@ -574,11 +652,18 @@ func parsePlainTextLog(line string) LogEntry {
 // nothing, the trimmed original line is returned.
 func stripLeadingMeta(line, timeStr, levelStr string) string {
 	s := line
-	if timeStr != "" {
-		s = stripPrefixToken(s, timeStr)
-	}
-	if levelStr != "" {
-		s = stripPrefixToken(s, levelStr)
+	// Try both orders. Loggers disagree on whether the level or the timestamp
+	// comes first, and stripping time-then-level once meant a "LEVEL <time> msg"
+	// line kept its timestamp in the message — printed again right after the
+	// [timestamp] prefix logx had already rendered from it. Two passes are enough
+	// to consume two tokens in either order.
+	for range 2 {
+		if timeStr != "" {
+			s = stripPrefixToken(s, timeStr)
+		}
+		if levelStr != "" {
+			s = stripPrefixToken(s, levelStr)
+		}
 	}
 	if strings.TrimSpace(s) == "" {
 		return strings.TrimSpace(line)
@@ -668,6 +753,15 @@ func parseLogfmtFields(line string) (map[string]any, bool) {
 			return nil, false
 		}
 		key := line[keyStart:i]
+		// Validate the key the same way splitTrailingFields does. Without this, any
+		// line whose whitespace-separated tokens all happen to contain '=' is
+		// claimed as logfmt — a bare URL with a query string, or a CSV row whose
+		// message contains '='. Because logfmt is tried before klog/syslog/access/
+		// xml/csv, such a false match blocks the parser that would have read the
+		// line correctly and its real level is lost.
+		if !logfmtKeyRegex.MatchString(key) {
+			return nil, false
+		}
 		i++
 
 		value := ""
@@ -718,7 +812,39 @@ func stringValue(v any) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
+	// A JSON null has no textual form. Without this, fmt renders it as "<nil>",
+	// which was printed as if it were the log's own content — fabricating data
+	// (e.g. {"message":null} displayed the message "<nil>").
+	if v == nil {
+		return ""
+	}
 	return fmt.Sprintf("%v", v)
+}
+
+// fieldValueFold is the case-insensitive fallback for fieldValue. Loggers
+// disagree on capitalization — Serilog and most .NET stacks emit "Level",
+// "Msg", and "Timestamp" — and enumerating every casing variant in the
+// field-name lists does not scale (jsonLevelFields already carried both "level"
+// and "LEVEL", and still missed "Level"). Getting this wrong is not merely a
+// filtering annoyance: an unrecognized level field left the entry at the DEBUG
+// default, so a Serilog ERROR line was invisible at --level ERROR.
+//
+// Exact match always wins, so this only runs on a miss. When several keys differ
+// only by case, the lexicographically smallest wins, so the result never depends
+// on Go's randomized map iteration order. No allocation on either path.
+func fieldValueFold(fields map[string]any, name string) (any, bool) {
+	var bestKey string
+	var best any
+	found := false
+	for k, v := range fields {
+		if !strings.EqualFold(k, name) {
+			continue
+		}
+		if !found || k < bestKey {
+			bestKey, best, found = k, v, true
+		}
+	}
+	return best, found
 }
 
 func firstField(fields map[string]any, names ...string) (any, bool) {
@@ -730,7 +856,29 @@ func firstField(fields map[string]any, names ...string) (any, bool) {
 	return nil, false
 }
 
+// fieldValue resolves a field name, falling back to a case-insensitive match so
+// loggers that capitalize differently still resolve. Use fieldValueExact for
+// pure heuristics, where the extra scan is not worth its cost.
 func fieldValue(fields map[string]any, name string) (any, bool) {
+	if value, ok := fieldValueExact(fields, name); ok {
+		return value, true
+	}
+	if strings.Contains(name, ".") {
+		return nil, false
+	}
+	return fieldValueFold(fields, name)
+}
+
+// fieldValueExact resolves a field name by exact match only, following a dotted
+// name as a path into nested maps.
+//
+// This is the variant used by the HTTP-shape heuristics (hasAnyField over
+// httpContextFields), which probe ~16 names purely to decide whether a line
+// looks like an access log. Running a case-insensitive scan per miss there cost
+// noticeably more on wide JSON objects than the heuristic is worth, while the
+// lookups that actually matter — level, message, and timestamp — keep the
+// fallback via fieldValue.
+func fieldValueExact(fields map[string]any, name string) (any, bool) {
 	if value, ok := fields[name]; ok {
 		return value, true
 	}
@@ -875,16 +1023,28 @@ func parseNumericLogLevel(level int) LogLevel {
 	}
 }
 
+// isInStringSet reports whether key is in a set built by buildStringSet,
+// ignoring case. strings.ToLower returns its argument unchanged for an
+// all-lowercase ASCII key, so the common case does not allocate.
+func isInStringSet(set map[string]bool, key string) bool {
+	return set[strings.ToLower(key)]
+}
+
 func buildStringSet(groups ...[]string) map[string]bool {
 	size := 0
 	for _, group := range groups {
 		size += len(group)
 	}
 
+	// Keys are stored lowercased and looked up through isInStringSet, so the
+	// display-exclusion sets recognize the same casing variants that field lookup
+	// does. Without this, a Serilog line was parsed correctly but then printed its
+	// message twice — once as the message, once as an ordinary "Msg=" field —
+	// because the exclusion check was exact-match while the lookup was not.
 	set := make(map[string]bool, size)
 	for _, group := range groups {
 		for _, value := range group {
-			set[value] = true
+			set[strings.ToLower(value)] = true
 		}
 	}
 	return set

@@ -3,8 +3,12 @@ package logging
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dantech2000/logx/internal/terminal"
 )
 
 // OutputFormat selects how the pipeline renders each kept entry.
@@ -49,19 +53,28 @@ type jsonEntry struct {
 }
 
 // MarshalEntryJSON renders a parsed entry as a single normalized JSON object.
-// json.Marshal escapes control bytes (so no raw ANSI/escape leaks) and replaces
-// invalid UTF-8, keeping the output safe to print while preserving data.
+//
+// Every string is run through terminal.Sanitize first. json.Marshal alone is not
+// enough: it escapes only code points below 0x20, so DEL (0x7F), the C1 controls
+// (U+0080–U+009F — a UTF-8 terminal maps U+009B to CSI, a working escape
+// introducer), and Trojan-Source bidi overrides all passed through raw. NDJSON
+// gets read by humans in a terminal as often as by jq, so it needs the same
+// guarantee as the text renderer.
 func MarshalEntryJSON(entry LogEntry) string {
+	// The message is emitted even when it is just the raw line. Blanking it here
+	// dropped the content of every unstructured log line — the most common pod-log
+	// shape — because jsonEntry has no raw field to carry it instead.
+	message := entry.Message
+	if message == "" {
+		message = entry.RawLine
+	}
+
 	out := jsonEntry{
 		Level:   entry.Level.String(),
-		Logger:  entry.Logger,
-		Message: entry.Message,
+		Logger:  terminal.Sanitize(entry.Logger),
+		Message: terminal.Sanitize(message),
 		Format:  formatNames[entry.Format],
-		Fields:  extraFields(entry.Fields),
-	}
-	if entry.Message == entry.RawLine {
-		// The parser fell back to the raw line as the message; don't echo it.
-		out.Message = ""
+		Fields:  sanitizeJSONFields(extraFields(entry.Fields)),
 	}
 	if !entry.Timestamp.IsZero() {
 		out.Time = entry.Timestamp.UTC().Format(time.RFC3339)
@@ -70,15 +83,60 @@ func MarshalEntryJSON(entry LogEntry) string {
 }
 
 // marshalProjectedJSON renders only the requested (pre-classified) keys as a
-// flat JSON object, the JSON counterpart of the --fields projection.
-func marshalProjectedJSON(entry LogEntry, fields []projectedField) string {
+// flat JSON object, the JSON counterpart of the --fields projection. It reports
+// false when no requested key resolved, so the caller can skip the line instead
+// of emitting a content-free "{}" for every non-matching entry.
+func marshalProjectedJSON(entry LogEntry, fields []projectedField) (string, bool) {
 	obj := make(map[string]any, len(fields))
 	for _, f := range fields {
 		if v, ok := resolveByKind(entry, f.kind, f.key); ok {
-			obj[f.key] = v
+			obj[terminal.Sanitize(f.key)] = sanitizeJSONValue(v)
 		}
 	}
-	return marshalLine(obj)
+	if len(obj) == 0 {
+		return "", false
+	}
+	return marshalLine(obj), true
+}
+
+// sanitizeJSONFields sanitizes a field map, preserving nil for omitempty.
+func sanitizeJSONFields(fields map[string]any) map[string]any {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(fields))
+	for k, v := range fields {
+		out[terminal.Sanitize(k)] = sanitizeJSONValue(v)
+	}
+	return out
+}
+
+// sanitizeJSONValue recursively neutralizes control characters in strings and
+// normalizes values json.Marshal cannot encode.
+func sanitizeJSONValue(v any) any {
+	switch typed := v.(type) {
+	case string:
+		return terminal.Sanitize(typed)
+	case map[string]any:
+		return sanitizeJSONFields(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = sanitizeJSONValue(item)
+		}
+		return out
+	case float64:
+		// NaN and ±Inf are not representable in JSON and make json.Marshal fail
+		// for the whole object. A YAML-flow line carrying `.nan` therefore used to
+		// be emitted as a bare "{}", losing level, message, timestamp and every
+		// field. Render them as their textual form instead.
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return strconv.FormatFloat(typed, 'g', -1, 64)
+		}
+		return typed
+	default:
+		return v
+	}
 }
 
 // extraFields returns the structured fields minus the ones already surfaced as
@@ -89,7 +147,7 @@ func extraFields(fields map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(fields))
 	for k, v := range fields {
-		if jsonFormattedFieldExclusions[k] || isJSONMessageField(k) {
+		if isInStringSet(jsonFormattedFieldExclusions, k) || isJSONMessageField(k) {
 			continue
 		}
 		out[k] = v
@@ -103,7 +161,11 @@ func extraFields(fields map[string]any) map[string]any {
 func marshalLine(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return "{}"
+		// Values are normalized by sanitizeJSONValue before they get here, so this
+		// should be unreachable. Emit a visible marker rather than a bare "{}",
+		// which silently discarded the entire entry — a single NaN field used to
+		// erase level, message, timestamp and all.
+		return `{"logx_error":"entry could not be encoded as JSON"}`
 	}
 	return string(b)
 }

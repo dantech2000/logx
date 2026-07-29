@@ -3,8 +3,12 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dantech2000/logx/internal/logging"
 	corev1 "k8s.io/api/core/v1"
@@ -169,5 +173,150 @@ func TestLogFetcher_GetSelectedPodLogsAllNamespaces(t *testing.T) {
 	}
 	if got := strings.Count(strings.TrimRight(out, "\n"), "\n") + 1; got != 2 {
 		t.Fatalf("expected 2 streams across namespaces, got %d:\n%s", got, out)
+	}
+}
+
+// TestLogFetcher_StatsWrittenWhenAStreamFails pins that a partial failure still
+// produces a digest. fanInStreams deliberately lets a failing stream run
+// alongside its siblings rather than cancelling them, so the aggregate over the
+// streams that *did* succeed is exactly what --stats is for. Returning early on
+// the first error would throw that away — with a wide --selector, one pod stuck
+// in ContainerCreating would blank the digest for every healthy pod.
+func TestLogFetcher_StatsWrittenWhenAStreamFails(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		ga, ok := action.(clientgotesting.GenericAction)
+		if !ok {
+			t.Fatalf("expected GenericAction, got %T", action)
+		}
+		opts, ok := ga.GetValue().(*corev1.PodLogOptions)
+		if !ok {
+			t.Fatalf("expected *corev1.PodLogOptions, got %T", ga.GetValue())
+		}
+		if opts.Container == "broken" {
+			return true, nil, errors.New("container is waiting to start: ContainerCreating")
+		}
+		return true, &runtime.Unknown{Raw: []byte("ERROR boom from " + opts.Container)}, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "healthy"}, {Name: "broken"}}},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
+	fetcher.FilterLevel = logging.DEBUG
+	fetcher.Filters = logging.PipelineOptions{MinLevel: logging.DEBUG, CollectStats: true}
+
+	// The failing stream is still reported.
+	if err := fetcher.GetAllContainerLogs(context.Background()); err == nil {
+		t.Fatal("expected the broken stream to surface an error")
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "logx stats") {
+		t.Fatalf("stats digest was dropped because a sibling stream failed:\n%q", out)
+	}
+	if !strings.Contains(out, "ERROR 1") {
+		t.Fatalf("digest should still count the healthy stream's line:\n%q", out)
+	}
+}
+
+// followBlockingWriter blocks every write until released, standing in for the
+// --follow case where a stream goroutine never returns because scanner.Scan()
+// waits forever on the next line.
+type followBlockingWriter struct {
+	release chan struct{}
+	hit     chan struct{}
+	once    atomic.Bool
+}
+
+func (w *followBlockingWriter) Write(p []byte) (int, error) {
+	if w.once.CompareAndSwap(false, true) {
+		close(w.hit)
+	}
+	<-w.release
+	return len(p), nil
+}
+
+// TestLogFetcher_FollowOpensEveryStream pins that --follow opens every stream
+// regardless of --max-concurrency.
+//
+// errgroup's SetLimit blocks the dispatch loop until a worker slot frees, and a
+// followed stream never returns — so a pool smaller than the stream count does
+// not throttle, it starves. Streams past the limit were never opened at all, for
+// the life of the command: `logx logs -f --selector app=api` against a
+// 20-replica Deployment tailed 10 pods and silently ignored the other 10, with no
+// error and no diagnostic. validateLogOptions explicitly permits that
+// combination, so it was fully reachable.
+func TestLogFetcher_FollowOpensEveryStream(t *testing.T) {
+	const containers, limit = 6, 2
+
+	var opened atomic.Int32
+	clientset := fake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods/log", func(clientgotesting.Action) (bool, runtime.Object, error) {
+		opened.Add(1)
+		return true, &runtime.Unknown{Raw: []byte("INFO hello\n")}, nil
+	})
+
+	list := make([]corev1.Container, containers)
+	for i := range list {
+		list[i] = corev1.Container{Name: fmt.Sprintf("c%d", i)}
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: list},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	w := &followBlockingWriter{release: make(chan struct{}), hit: make(chan struct{})}
+	lf := NewLogFetcher(clientset, "default", "p", true /* follow */, false, w)
+	lf.FilterLevel = logging.DEBUG
+	lf.MaxConcurrency = limit
+
+	done := make(chan error, 1)
+	go func() { done <- lf.GetAllContainerLogs(context.Background()) }()
+
+	select {
+	case <-w.hit:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no stream produced output")
+	}
+	// Give the pool every opportunity to dispatch the remaining streams.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && opened.Load() < containers {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := opened.Load(); got != containers {
+		t.Fatalf("--follow with --max-concurrency=%d opened %d/%d streams; the rest are starved forever",
+			limit, got, containers)
+	}
+
+	close(w.release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fanInStreams never returned")
+	}
+}
+
+// TestEffectiveMaxConcurrencyStillCapsWithoutFollow pins that the cap keeps
+// doing its job for a finite fetch, where streams do return and bounding the
+// burst of simultaneous API requests is exactly right.
+func TestEffectiveMaxConcurrencyStillCapsWithoutFollow(t *testing.T) {
+	lf := &LogFetcher{MaxConcurrency: 3}
+	if got := lf.effectiveMaxConcurrency(10); got != 3 {
+		t.Errorf("non-follow cap = %d, want 3", got)
+	}
+	lf.Follow = true
+	if got := lf.effectiveMaxConcurrency(10); got != 10 {
+		t.Errorf("follow must open every stream, got %d, want 10", got)
 	}
 }

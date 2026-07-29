@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dantech2000/logx/internal/terminal"
 )
 
 // Stats accumulates a digest over the entries a pipeline keeps: counts by level,
@@ -209,6 +211,10 @@ func (s *Stats) writeTopMessages(b *strings.Builder, n int) {
 	}
 	fmt.Fprintln(b, "top messages:")
 	for _, r := range ranked {
-		fmt.Fprintf(b, "  %5d  %s\n", r.count, r.msg)
+		// r.msg is untrusted log content, so it gets the same escape-neutralizing
+		// treatment as every other render path. Sanitizing here rather than in
+		// Record keeps the per-line hot path allocation-free: only the handful of
+		// messages that actually reach the digest pay for it.
+		fmt.Fprintf(b, "  %5d  %s\n", r.count, terminal.Sanitize(r.msg))
 	}
 }

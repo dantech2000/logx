@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +211,75 @@ func TestFormatProjectedEntryTimestampVirtualKey(t *testing.T) {
 	out := formatProjectedEntry(entry, classifyFields([]string{"ts", "msg"}))
 	if out != `ts=2026-06-24 10:00:00 msg=hi` {
 		t.Fatalf("formatProjectedEntry ts = %q", out)
+	}
+}
+
+// ansiStripRegex removes CSI escape sequences so a test can compare the text a
+// user actually sees, independent of coloring.
+var ansiStripRegex = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]")
+
+func visibleText(s string) string { return ansiStripRegex.ReplaceAllString(s, "") }
+
+// TestHighlightMatchesDoesNotCorruptANSI pins the core invariant of match
+// highlighting: it may only insert reverse-video toggles, never alter the text
+// the user sees. Highlighting runs on an already-colorized line, so a pattern
+// like [0-9]+ can otherwise match the digits *inside* a theme escape sequence
+// (the 36 in "\x1b[36m") and splice highlight codes into the middle of it,
+// producing "\x1b[\x1b[7m36\x1b[27mm" — garbage to a terminal.
+func TestHighlightMatchesDoesNotCorruptANSI(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorAlways)
+
+	tests := []struct {
+		name    string
+		line    string
+		pattern string
+	}{
+		{"digits match inside color codes", "GET /api status=200 took 45ms", `[0-9]+`},
+		{"bare m matches SGR terminator", "make a map of matches", `m`},
+		{"bracket matches CSI introducer", "array[0] and array[1]", `\[`},
+		{"semicolon and digits", "a=1;b=2;c=3", `[0-9;]+`},
+		{"letters used by SGR", "the quick brown fox", `[a-z]`},
+		{"json entry with numeric field", `{"level":"error","msg":"db down","status":500}`, `[0-9]+`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			re := regexp.MustCompile(tc.pattern)
+			rendered := FormatLogEntry(ParseLogEntry(tc.line))
+			highlighted := highlightMatches(rendered, []*regexp.Regexp{re})
+
+			if got, want := visibleText(highlighted), visibleText(rendered); got != want {
+				t.Errorf("highlighting changed visible text:\n  got  %q\n  want %q\n  raw  %q",
+					got, want, highlighted)
+			}
+
+			// Every ESC must introduce a complete CSI sequence; a spliced-into
+			// sequence leaves an ESC followed by something else.
+			for i := 0; i < len(highlighted); i++ {
+				if highlighted[i] != 0x1b {
+					continue
+				}
+				loc := ansiStripRegex.FindStringIndex(highlighted[i:])
+				if loc == nil || loc[0] != 0 {
+					t.Fatalf("malformed escape sequence at byte %d in %q", i, highlighted)
+				}
+			}
+		})
+	}
+}
+
+// TestHighlightMatchesStillHighlights guards against "fix" by disabling: the
+// visible-text invariant above is trivially satisfied by a no-op, so assert a
+// match in ordinary text really is wrapped.
+func TestHighlightMatchesStillHighlights(t *testing.T) {
+	restoreColor(t)
+	ApplyColorMode(ColorAlways)
+
+	rendered := FormatLogEntry(ParseLogEntry("connection refused for backend"))
+	highlighted := highlightMatches(rendered, []*regexp.Regexp{regexp.MustCompile("refused")})
+
+	if !strings.Contains(highlighted, highlightOn+"refused"+highlightOff) {
+		t.Fatalf("expected %q to be wrapped in reverse-video, got %q", "refused", highlighted)
 	}
 }

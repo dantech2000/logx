@@ -33,30 +33,38 @@ var loadedConfig fileConfig
 
 // configPath resolves the config file location: $LOGX_CONFIG, else
 // $XDG_CONFIG_HOME/logx/config.yaml, else ~/.config/logx/config.yaml.
-func configPath() string {
+//
+// The second return reports whether the path was named explicitly via
+// $LOGX_CONFIG. That distinction decides how a missing file is treated: not
+// finding the default location is the normal no-config case, but a file the user
+// pointed at by name and that does not exist is a mistake worth reporting rather
+// than running with settings they believe are applied.
+func configPath() (string, bool) {
 	if p := os.Getenv("LOGX_CONFIG"); p != "" {
-		return p
+		return p, true
 	}
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "logx", "config.yaml")
+		return filepath.Join(dir, "logx", "config.yaml"), false
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "logx", "config.yaml")
+		return filepath.Join(home, ".config", "logx", "config.yaml"), false
 	}
-	return ""
+	return "", false
 }
 
-// loadConfig reads and parses the config file. A missing file is not an error
-// (an empty config is returned); a malformed file is, so a typo surfaces.
+// loadConfig reads and parses the config file. A missing file at the default
+// location is not an error (an empty config is returned); a missing file named
+// explicitly by $LOGX_CONFIG is, as is a malformed file, so a typo surfaces
+// instead of the run silently proceeding without the requested settings.
 func loadConfig() (fileConfig, error) {
 	var cfg fileConfig
-	path := configPath()
+	path, explicit := configPath()
 	if path == "" {
 		return cfg, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) && !explicit {
 			return cfg, nil
 		}
 		return cfg, fmt.Errorf("reading config %s: %w", path, err)

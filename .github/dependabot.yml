@@ -1,0 +1,43 @@
+version: 2
+
+# Without this file nothing watches dependencies, so a CVE in a transitive
+# module is only discovered when the govulncheck CI job happens to run — which
+# for a repo with infrequent pushes can be weeks after disclosure. GO-2026-5970
+# (infinite loop on invalid input in golang.org/x/text, reachable here through
+# client-go's request path) sat undetected for exactly that reason.
+#
+# Note this covers version updates only. Dependabot *security alerts* are a
+# separate repository setting and are currently disabled; enable them under
+# Settings → Code security for advisories to be surfaced as they land.
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches the repo's Conventional Commit convention.
+      prefix: chore
+      include: scope
+    groups:
+      # The k8s libraries move in lockstep; separate PRs for each would never
+      # build, since client-go pins matching api/apimachinery versions.
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns:
+          - "*"

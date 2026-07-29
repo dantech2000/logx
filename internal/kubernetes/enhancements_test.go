@@ -125,7 +125,7 @@ func TestEffectiveMaxConcurrency(t *testing.T) {
 		want        int
 	}{
 		{"default capped by streams", 0, 5, 5},
-		{"default applies", 0, 20, defaultMaxConcurrency},
+		{"default applies", 0, 20, DefaultMaxConcurrency},
 		{"explicit below streams", 3, 20, 3},
 		{"explicit above streams clamps", 3, 2, 2},
 		{"negative falls back to default", -1, 5, 5},

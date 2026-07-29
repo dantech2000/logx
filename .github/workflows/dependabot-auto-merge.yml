@@ -1,0 +1,44 @@
+name: Dependabot auto-merge
+
+# Enables auto-merge on Dependabot pull requests. GitHub then merges the PR once
+# the branch protection rules on main are satisfied — which is the whole point:
+# without required status checks, "auto-merge" degrades to "merge immediately,
+# ignore CI". The required checks are Build & Vet, Race tests, Lint, and
+# Vulnerability scan.
+#
+# Major version bumps are deliberately excluded. A major bump can change API
+# behavior in ways CI here would not catch, so those wait for a human.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Explain why a major bump was left alone
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr comment "$PR_URL" --body \
+            "Not auto-merging: this is a major version bump (\`${UPDATE_TYPE}\`) and needs a human to check for behavior changes."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
