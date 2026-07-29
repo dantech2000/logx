@@ -31,13 +31,13 @@ jobs:
     steps:
       - name: Fetch Dependabot metadata
         id: meta
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
         if: steps.meta.outputs.ghsa-id != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history so the tag list is visible for the version bump.
           fetch-depth: 0
