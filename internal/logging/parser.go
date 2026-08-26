@@ -19,6 +19,7 @@ const (
 	FormatJSON
 	FormatBracketed
 	FormatLogfmt
+	FormatXML
 )
 
 // LogEntry represents a parsed log entry with all possible fields
@@ -135,10 +136,13 @@ var (
 	// timestamp — "Scheduled next backup for 2026-12-25" was stamped with a date
 	// six months in the future, which corrupts --timeline ordering, `ts`
 	// predicates, and the .time field of --output json. A real entry timestamp is
-	// a prefix by universal convention; a date further in is content.
+	// a prefix by universal convention; a date further in is content. A trailing
+	// separator (whitespace, `]`, `:`, or end of line) is required too, so a
+	// value merely glued to the match ("...Zerror") is not extracted as the
+	// entry's time and then also left behind in the rendered message.
 	plainTextLeadingTimestampRegex = regexp.MustCompile(
-		`^[\s\[]*(?:(?i:DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|TRACE)\]?\s+\[?)?(` +
-			plainTextTimestampPattern + `)`)
+		`^[\s\[]*(?:(?i:DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL)\]?\s+\[?)?(` +
+			plainTextTimestampPattern + `)(?:[\s\]:]|$)`)
 	// Level detection in plain text uses two regexes, because the cost of a
 	// mistake is asymmetric. Reading prose as ERROR or WARN is over-inclusion: the
 	// line is still shown. Reading it as TRACE is the one direction that loses
@@ -149,9 +153,16 @@ var (
 	// plainTextLeadingLevelRegex matches a level in the position a real marker
 	// occupies: the head of the line, optionally after a timestamp and/or
 	// brackets, and followed by a separator. Every level, TRACE included, is
-	// trusted here.
+	// trusted here. Its optional leading timestamp carries the same trailing-
+	// separator requirement as plainTextLeadingTimestampRegex, so the two
+	// regexes cannot disagree about where a timestamp ends: without it,
+	// "2026-06-24T10:00:00Zerror boom" was rejected as a timestamp (glued) yet
+	// still read as <time><level> and classified ERROR from the prose "error".
+	// With it, both regexes reject the glued prefix, the fallback scan's
+	// alphanumeric guard keeps "Zerror" from matching either, and the line stays
+	// an unclassified DEBUG with its content untouched.
 	plainTextLeadingLevelRegex = regexp.MustCompile(
-		`^[\s\[]*(?:` + plainTextTimestampPattern + `)?[\s\]\[]*` +
+		`^[\s\[]*(?:` + plainTextTimestampPattern + `(?:[\s\]:]|$))?[\s\]\[]*` +
 			`((?i:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL))(?:[\s\]:]|$)`)
 
 	// plainTextLevelRegex is the fallback scan over the rest of the line, for
@@ -207,6 +218,14 @@ func (jsonLogParser) Parse(line string) (LogEntry, bool) {
 	decoder := json.NewDecoder(strings.NewReader(trimmedLine))
 	decoder.UseNumber()
 	if err := decoder.Decode(&data); err != nil {
+		return LogEntry{}, false
+	}
+	// Decode reads only the first JSON value. Accepting trailing content made
+	// "{...} garbage" parse with the garbage dropped, and "{...}{...}" lose the
+	// second object entirely — its level and message silently discarded.
+	// Rejecting lets the line fall through to the plain-text parser, which keeps
+	// all of it as the message.
+	if decoder.More() {
 		return LogEntry{}, false
 	}
 	return parseJSONLog(trimmedLine, data), true
@@ -509,8 +528,16 @@ func parseJSONTimestamp(data map[string]any) time.Time {
 					return ts
 				}
 			}
+			// yaml.v2 decodes integer scalars as int, not json.Number; without
+			// these cases a YAML flow map's epoch timestamp was silently ignored.
+			switch numTime := val.(type) {
+			case int:
+				return parseUnixTimestampInt(int64(numTime))
+			case int64:
+				return parseUnixTimestampInt(numTime)
+			}
 			if timeStr, ok := val.(string); ok {
-				if ts, ok := parseUnixTimestampString(timeStr); ok {
+				if ts, ok := parseStringTimestamp(timeStr); ok {
 					return ts
 				}
 				if ts, err := parseTimestamp(timeStr); err == nil {
@@ -520,6 +547,33 @@ func parseJSONTimestamp(data map[string]any) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// parseStringTimestamp interprets a timestamp field's string value as either
+// epoch seconds/millis or an already-formatted time.
+//
+// The epoch interpretation runs second because it is the more dangerous guess:
+// an 8-digit run that is also a valid calendar date ("20260624") parses as both,
+// but as epoch seconds it always lands in 1970–1973, silently stamping every
+// such entry half a century into the past. A valid YYYYMMDD date therefore wins;
+// anything that fails the date layout (a real epoch value like "1750759200", or
+// "20261399", which is no month at all) still parses numerically below.
+func parseStringTimestamp(value string) (time.Time, bool) {
+	if len(value) == 8 && isAllDigits(value) {
+		if ts, err := time.Parse("20060102", value); err == nil {
+			return ts, true
+		}
+	}
+	return parseUnixTimestampString(value)
+}
+
+func isAllDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseUnixTimestamp(value float64) time.Time {
@@ -707,7 +761,11 @@ func splitTrailingFields(message string) (string, map[string]any) {
 		if fields == nil {
 			fields = make(map[string]any)
 		}
-		fields[key] = strings.Trim(value, `"`)
+		// Backward iteration visits the last occurrence first; skipping repeats
+		// keeps last-wins semantics, matching the logfmt parser.
+		if _, exists := fields[key]; !exists {
+			fields[key] = strings.Trim(value, `"`)
+		}
 		fieldStart = i
 	}
 
@@ -766,23 +824,7 @@ func parseLogfmtFields(line string) (map[string]any, bool) {
 
 		value := ""
 		if i < len(line) && line[i] == '"' {
-			i++
-			var builder strings.Builder
-			for i < len(line) {
-				if line[i] == '\\' && i+1 < len(line) {
-					i++
-					builder.WriteByte(line[i])
-					i++
-					continue
-				}
-				if line[i] == '"' {
-					i++
-					break
-				}
-				builder.WriteByte(line[i])
-				i++
-			}
-			value = builder.String()
+			value, i = scanQuotedLogfmtValue(line, i)
 		} else {
 			valueStart := i
 			for i < len(line) && line[i] != ' ' {
@@ -794,6 +836,39 @@ func parseLogfmtFields(line string) (map[string]any, bool) {
 	}
 
 	return fields, len(fields) > 0
+}
+
+// scanQuotedLogfmtValue reads a double-quoted logfmt value starting at the
+// opening quote line[i] and returns the decoded value plus the index just past
+// the closing quote (or end of line, for an unterminated value).
+//
+// Escaped backslash and quote collapse to the bare byte; any other escape keeps
+// both characters. Dropping the backslash unconditionally corrupted values like
+// "C:\temp" into "C:temp", and decoding \n would smuggle a newline into what
+// must stay a single output line.
+func scanQuotedLogfmtValue(line string, i int) (string, int) {
+	i++ // opening quote
+	var builder strings.Builder
+	for i < len(line) {
+		if line[i] == '\\' && i+1 < len(line) {
+			i++
+			if line[i] == '\\' || line[i] == '"' {
+				builder.WriteByte(line[i])
+			} else {
+				builder.WriteByte('\\')
+				builder.WriteByte(line[i])
+			}
+			i++
+			continue
+		}
+		if line[i] == '"' {
+			i++
+			break
+		}
+		builder.WriteByte(line[i])
+		i++
+	}
+	return builder.String(), i
 }
 
 func firstStringField(fields map[string]any, names ...string) (string, bool) {

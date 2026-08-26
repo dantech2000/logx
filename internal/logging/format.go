@@ -261,7 +261,7 @@ func FormatLogEntryDetails(entry LogEntry) string {
 	switch entry.Format {
 	case FormatJSON:
 		return formatJSONDetails(entry)
-	case FormatBracketed, FormatLogfmt:
+	case FormatBracketed, FormatLogfmt, FormatXML:
 		return formatStructuredDetails(entry)
 	default:
 		return formatPlainTextDetails(entry)

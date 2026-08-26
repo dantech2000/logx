@@ -39,6 +39,7 @@ var formatNames = map[LogFormat]string{
 	FormatJSON:      "json",
 	FormatBracketed: "bracketed",
 	FormatLogfmt:    "logfmt",
+	FormatXML:       "xml",
 }
 
 // jsonEntry is the normalized shape emitted by --output json. It is intentionally
