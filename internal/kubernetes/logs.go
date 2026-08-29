@@ -182,21 +182,22 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 
 	pipeline := lf.newPipeline()
-	err := lf.streamLogs(ctx, lf.Namespace, lf.PodName, lf.ContainerName, pipeline, func(line string) error {
+	// The digest is written even when the stream failed, mirroring
+	// fanInStreams: --stats over a container that died mid-fetch still reports
+	// everything read before the failure instead of printing nothing.
+	streamErr := lf.streamLogs(ctx, lf.Namespace, lf.PodName, lf.ContainerName, pipeline, func(line string) error {
 		if _, err := fmt.Fprintln(lf.Writer, line); err != nil {
 			return fmt.Errorf("error writing log line: %w", err)
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
 	if stats := pipeline.Stats(); stats != nil {
-		return stats.Write(lf.Writer)
+		if werr := stats.Write(lf.Writer); werr != nil && streamErr == nil {
+			return werr
+		}
 	}
-
-	return nil
+	return streamErr
 }
 
 // streamLogs opens the log stream for one container and drives pipeline over it

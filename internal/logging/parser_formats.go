@@ -2,6 +2,8 @@ package logging
 
 import (
 	"encoding/csv"
+	"errors"
+	"io"
 	"regexp"
 	"strings"
 
@@ -23,7 +25,14 @@ func (yamlFlowParser) Parse(line string) (LogEntry, bool) {
 		return LogEntry{}, false
 	}
 	var data map[string]any
-	if err := yaml.Unmarshal([]byte(trimmed), &data); err != nil || len(data) == 0 {
+	// A decoder (rather than Unmarshal) also lets us reject trailing content:
+	// Decode reads one document, so "{...}{...}" or "{...} garbage" would
+	// otherwise parse with everything after the first map silently dropped.
+	decoder := yaml.NewDecoder(strings.NewReader(trimmed))
+	if err := decoder.Decode(&data); err != nil || len(data) == 0 {
+		return LogEntry{}, false
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return LogEntry{}, false
 	}
 	// Require a recognized level or message key so a stray "{note: ...}" or a code
@@ -110,7 +119,7 @@ func (xmlLogParser) Parse(line string) (LogEntry, bool) {
 	// Level defaults to DEBUG to match every other parser's undetected-level
 	// default. Leaving it as the zero value would mean TRACE, which sits below
 	// the default --level and would hide every XML line lacking a level attribute.
-	entry := LogEntry{Level: DEBUG, Format: FormatLogfmt, Fields: fields, RawLine: line}
+	entry := LogEntry{Level: DEBUG, Format: FormatXML, Fields: fields, RawLine: line}
 	if level, ok := parseJSONLevel(fields); ok {
 		entry.Level, entry.LevelDetected = level, true
 	}

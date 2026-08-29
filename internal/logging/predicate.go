@@ -254,10 +254,14 @@ func (fp FieldPredicate) equals(str string) bool {
 	}
 	// Integers are compared as integers so that a 19-digit trace or span ID is
 	// not collapsed by float64's 53-bit mantissa, where ...992 and ...993 are the
-	// same value and a predicate would match the wrong span.
-	if a, err := strconv.ParseInt(str, 10, 64); err == nil {
-		b, berr := strconv.ParseInt(fp.val, 10, 64)
-		return berr == nil && a == b
+	// same value and a predicate would match the wrong span. The int path only
+	// applies when both sides are integer literals: returning early here also
+	// skipped the float comparison below, so `status==404.0` never matched a
+	// field of 404.
+	if b, berr := strconv.ParseInt(fp.val, 10, 64); berr == nil {
+		if a, aerr := strconv.ParseInt(str, 10, 64); aerr == nil {
+			return a == b
+		}
 	}
 	n, err := strconv.ParseFloat(str, 64)
 	return err == nil && n == fp.num
