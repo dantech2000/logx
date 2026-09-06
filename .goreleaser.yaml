@@ -77,13 +77,17 @@ homebrew_casks:
     homepage: 'https://github.com/dantech2000/logx'
     description: 'Enhanced Kubernetes pod log viewer'
     license: 'MIT'
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/logx"]
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kubectl-logx"]
-          end
+    # The release binaries are not Developer ID-signed, so clear the download
+    # quarantine after Homebrew stages them. Homebrew 6.0.22 deprecated the Ruby
+    # `postflight` block that `hooks.post.install` emits, so declare the
+    # replacement `postflight_steps` stanza through `custom_block` instead.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/logx"]
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/kubectl-logx"]
+        end
+      end
 
 changelog:
   sort: asc
