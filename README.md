@@ -392,7 +392,7 @@ nix develop
 
 Manual prerequisites:
 
-- Go 1.26 or later
+- Go 1.27 or later
 - Access to a Kubernetes cluster for manual testing
 - `kubectl` configured with the appropriate context
 - `just` command runner
