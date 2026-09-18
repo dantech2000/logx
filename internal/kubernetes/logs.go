@@ -45,7 +45,9 @@ type LogFetcher struct {
 	// recognizes and renders them).
 	Timestamps bool
 	// SinceSeconds and SinceTime bound how far back to read (only one is set);
-	// TailLines caps the number of trailing lines. Nil means unbounded.
+	// TailLines keeps the last N entries after filtering and grouping. Nil
+	// means unbounded. It reaches the server only for live follows; finite
+	// fetches window client-side (see clientTail).
 	SinceSeconds *int64
 	SinceTime    *metav1.Time
 	TailLines    *int64
@@ -182,6 +184,12 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 	}
 
 	pipeline := lf.newPipeline()
+	// A finite --tail window applies after filtering and grouping (see
+	// clientTail): buffer the window during the stream and release it here.
+	// Live follows stream directly; the server applies their tail.
+	if tail := lf.clientTail(); tail >= 0 {
+		pipeline.EnableTail(tail)
+	}
 	// The digest is written even when the stream failed, mirroring
 	// fanInStreams: --stats over a container that died mid-fetch still reports
 	// everything read before the failure instead of printing nothing.
@@ -191,6 +199,14 @@ func (lf *LogFetcher) GetLogs(ctx context.Context) error {
 		}
 		return nil
 	})
+	// Release a buffered --tail window even when the stream failed, mirroring
+	// the stats philosophy below: the last lines read before the failure are
+	// still the useful answer. FlushRetained is nil-safe without tail mode.
+	for _, line := range pipeline.FlushRetained() {
+		if _, err := fmt.Fprintln(lf.Writer, line); err != nil && streamErr == nil {
+			return fmt.Errorf("error writing log line: %w", err)
+		}
+	}
 
 	if stats := pipeline.Stats(); stats != nil {
 		if werr := stats.Write(lf.Writer); werr != nil && streamErr == nil {
@@ -230,10 +246,14 @@ func (lf *LogFetcher) streamLogs(ctx context.Context, namespace, pod, container 
 }
 
 // fetchPod fetches a pod with the shared "error fetching pod details" wrapping
-// used by every pod lookup in this package.
+// used by every pod lookup in this package. A misspelled name gets a
+// did-you-mean hint from the namespace's pods when one is close.
 func fetchPod(ctx context.Context, clientset kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
+		if suggestion := suggestPodName(ctx, clientset, namespace, name); suggestion != "" {
+			return nil, fmt.Errorf("error fetching pod details: %w (did you mean %q?)", err, suggestion)
+		}
 		return nil, fmt.Errorf("error fetching pod details: %w", err)
 	}
 	return pod, nil
@@ -247,16 +267,38 @@ func (lf *LogFetcher) getPod(ctx context.Context) (*corev1.Pod, error) {
 // podLogOptions builds the PodLogOptions for a container from the fetcher's
 // settings. Shared by single- and multi-stream paths so the log window is
 // defined in one place.
+//
+// TailLines reaches the server only for live follows (tail-then-follow needs
+// server support). Finite fetches read the full window and apply --tail
+// client-side after filtering and grouping (see clientTail): a server-side
+// tail would slice raw lines before the pipeline ever saw them, so a filter
+// usually matched nothing and multi-line entries lost their heads.
 func (lf *LogFetcher) podLogOptions(container string) corev1.PodLogOptions {
-	return corev1.PodLogOptions{
+	opts := corev1.PodLogOptions{
 		Container:    container,
 		Follow:       lf.Follow,
 		Previous:     lf.Previous,
 		Timestamps:   lf.Timestamps,
 		SinceSeconds: lf.SinceSeconds,
 		SinceTime:    lf.SinceTime,
-		TailLines:    lf.TailLines,
 	}
+	if lf.Follow {
+		opts.TailLines = lf.TailLines
+	}
+	return opts
+}
+
+// clientTail returns the --tail window for client-side windowing, or -1 when
+// there is no window to apply: no --tail was requested, the value is negative,
+// or the fetch is a live follow whose tail the server already applied.
+func (lf *LogFetcher) clientTail() int {
+	if lf.Follow || lf.TailLines == nil {
+		return -1
+	}
+	if *lf.TailLines < 0 {
+		return -1
+	}
+	return int(*lf.TailLines)
 }
 
 // newPipeline builds the shared logging pipeline from the fetcher's filters,

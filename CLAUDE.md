@@ -165,20 +165,54 @@ Sample log files covering the formats logx is expected to handle live in
   is still the useful answer.
 - **Multi-line grouping** (stack traces): an *indented* continuation line inherits
   the level of the entry it belongs to, so a stack trace stays visible at its
-  parent's `--level`. The level tracker carries the parent across intervening
-  flush-left lines (required so a Java/Go/Python flush-left exception/panic header
+  parent's `--level`. So does a *trace-boundary* line (`traceBoundaryRegex` in
+  `continuation.go`): Python's `Traceback (most recent call last):`, Go's
+  `goroutine N` / `pkg.Func()` lines, `Caused by:` chains, and
+  `SomethingError:`/`Exception:` footers. Without them a level filter showed
+  decapitated traces — frames without head or tail. Ordinary level-less prose
+  never joins (the match is pattern-gated, checked without any kubelet
+  timestamp prefix), and blank lines never join. The level tracker carries the
+  parent across intervening flush-left lines (required so a Java/Go/Python flush-left exception/panic header
   doesn't orphan its indented frames). The tradeoff is a bias toward
   over-inclusion; a perfectly precise version needs one-line lookahead, which is
-  incompatible with `--follow` streaming. See `internal/logging/continuation.go`.
+  incompatible with `--follow` streaming. `LevelTracker.Classify` also reports
+  each line's `GroupRole` (anchor vs continuation); the pipeline uses it to
+  filter entries as units (see `--grep` note) and to window `--tail` by entry.
+  See `internal/logging/continuation.go`.
 - `--timeline` shows only the target pod's own events (server-side field selector
   plus a client-side guard on **both** name and kind, since a Service or Deployment
   sharing the pod's name is common) and cannot be combined with `--follow`.
   `--since`/`--tail` bound the log portion of the timeline (events stay bounded
   separately by `maxTimelineEvents`). Content filters
   (`--grep`/`--exclude`/`--where`) do apply to its log portion, through the shared
-  `PipelineOptions.MatchesContent`; the flags that would replace its fixed
-  two-record-type rendering (`--fields`, `--output json`, `--stats`) are rejected
-  rather than silently ignored.
+  `logging.GroupFilter` (level floor included); the flags that would replace
+  its fixed two-record-type rendering (`--fields`, `--output json`, `--stats`)
+  are rejected rather than silently ignored. The timeline's collector filters
+  through the shared `logging.GroupFilter`, so its log portion keeps entries
+  as units exactly like a plain fetch.
+- **`--tail` windows client-side, after filtering and grouping** — except for
+  `--follow`, where the server tails before streaming. A server-side tail
+  slices raw lines before the pipeline sees them, so a filter usually matched
+  nothing and multi-line entries lost their heads. Finite fetches therefore
+  read the full (`--since`-bounded) window and keep the last N *entries* via a
+  `logging.TailBuffer` (anchors count, frames ride along; leading partial
+  groups from a `--since` cut are kept outside the budget). With
+  `--all-containers`/`--selector` the window is per stream (kubectl parity).
+  `--stats` over a window digests exactly the window (stats record at flush).
+- **`--grep`/`--exclude` filter entries as units.** A `--grep` match keeps its
+  whole multi-line entry (a footer-only match still rescues just that line);
+  an `--exclude` matching an anchor hides the whole entry, while a frame-only
+  match hides just that frame. `--where` predicates evaluate against the
+  anchor's entry (frames carry no fields of their own), while regexes still
+  match each line's own text. The join rules are mirror images so the
+  `--grep P`/`--exclude P` partition invariant in `metamorphic_test.go` still
+  holds exactly — run that suite before touching `GroupFilter.Keep`. Both `logx
+  logs` and `--timeline` filter through the shared `logging.GroupFilter`, so
+  the two views never disagree about what an entry is.
+- **A misspelled pod name gets a `did you mean` hint** (`suggestPodName` in
+  `internal/kubernetes/suggest.go`, Levenshtein over the namespace's pods with
+  a length-proportional budget). A failed pod list yields no hint rather than
+  masking the original error.
 - **`--previous` requires a single target** and is rejected with `--all-containers`
   or `--selector`: those paths never run the `-p` precondition check, so every
   stream was stamped `Previous: true` and any container that had not restarted

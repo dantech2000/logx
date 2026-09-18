@@ -26,6 +26,52 @@ type Pipeline struct {
 	fields  []projectedField
 	tracker LevelTracker
 	stats   *Stats
+	// filter applies level and content filtering with multi-line entries kept
+	// as units; shared with the --timeline view so both filter identically.
+	filter GroupFilter
+	// tail, when non-nil, retains the last N anchor-led groups instead of
+	// emitting lines immediately, so --tail counts complete entries after
+	// filtering rather than raw lines before it. Enable via EnableTail; nil
+	// (the default) preserves the immediate streaming behavior.
+	tail *TailBuffer[retainedLine]
+}
+
+// retainedLine is one buffered tail entry: the parsed entry (for a deferred
+// --stats digest over exactly the window shown) plus its rendered form.
+type retainedLine struct {
+	entry    LogEntry
+	rendered string
+}
+
+// EnableTail switches the pipeline to windowed mode: kept lines are retained
+// and FlushRetained releases them. Stats, when collected, are recorded at
+// flush time so the digest covers the retained window rather than the whole
+// stream read to fill it.
+func (p *Pipeline) EnableTail(maxAnchors int) {
+	p.tail = NewTailBuffer[retainedLine](maxAnchors)
+}
+
+// FlushRetained releases the tail window: the rendered lines in stream order,
+// or nil in stats mode (where it records the digest over the retained window
+// instead) and when tail mode is off. Call once after the stream ends; the
+// window drains, so a second call yields nothing.
+func (p *Pipeline) FlushRetained() []string {
+	if p.tail == nil {
+		return nil
+	}
+	retained := p.tail.Lines()
+	p.tail.Clear()
+	if p.stats != nil {
+		for _, line := range retained {
+			p.stats.Record(line.entry)
+		}
+		return nil
+	}
+	out := make([]string, 0, len(retained))
+	for _, line := range retained {
+		out = append(out, line.rendered)
+	}
+	return out
 }
 
 // projectedField pairs a --fields projection key with its precomputed kind.
@@ -74,7 +120,7 @@ type PipelineOptions struct {
 
 // NewPipeline returns a Pipeline configured by opts.
 func NewPipeline(opts PipelineOptions) *Pipeline {
-	p := &Pipeline{opts: opts, fields: classifyFields(opts.Fields)}
+	p := &Pipeline{opts: opts, fields: classifyFields(opts.Fields), filter: NewGroupFilter(opts.MinLevel, opts)}
 	if opts.CollectStats {
 		p.stats = NewStats()
 	}
@@ -89,7 +135,7 @@ func NewPipeline(opts PipelineOptions) *Pipeline {
 // mode.
 func NewPipelineWithStats(opts PipelineOptions, stats *Stats) *Pipeline {
 	opts.CollectStats = true
-	return &Pipeline{opts: opts, fields: classifyFields(opts.Fields), stats: stats}
+	return &Pipeline{opts: opts, fields: classifyFields(opts.Fields), filter: NewGroupFilter(opts.MinLevel, opts), stats: stats}
 }
 
 // Stats returns the accumulated digest, or nil if CollectStats was not set.
@@ -103,31 +149,53 @@ func (p *Pipeline) Stats() *Stats { return p.stats }
 // The full (untrimmed) line is passed to the parser and the level tracker so
 // leading indentation—which marks a continuation line—is preserved.
 func (p *Pipeline) ProcessLine(rawLine string) (string, bool) {
+	out, ok, _ := p.ProcessLineDetail(rawLine)
+	return out, ok
+}
+
+// ProcessLineDetail behaves like ProcessLine and additionally reports the
+// line's group role. Callers that must keep multi-line entries whole (notably
+// the --tail window, which counts entries rather than raw lines) use the role
+// to buffer anchors and continuations together. A dropped line reports its
+// role anyway, but callers only buffer emitted lines.
+func (p *Pipeline) ProcessLineDetail(rawLine string) (string, bool, GroupRole) {
 	if strings.TrimSpace(rawLine) == "" {
-		return "", false
+		return "", false, GroupAnchor
 	}
 	entry := ParseKubernetesLogEntry(rawLine)
-	entry.Level = p.tracker.Effective(entry, rawLine)
-	if !p.keep(entry, rawLine) {
-		return "", false
+	level, role := p.tracker.Classify(entry, rawLine)
+	entry.Level = level
+	if !p.keep(entry, rawLine, role) {
+		return "", false, role
+	}
+	if p.tail != nil {
+		// Windowed mode defers both rendering and stats: the digest must
+		// cover the retained window, and lines emit at flush time.
+		if p.stats == nil {
+			out, ok := p.render(entry)
+			if !ok {
+				return "", false, role
+			}
+			p.tail.Add(retainedLine{entry: entry, rendered: out}, role)
+		} else {
+			p.tail.Add(retainedLine{entry: entry}, role)
+		}
+		return "", false, role
 	}
 	if p.stats != nil {
 		p.stats.Record(entry)
 		// In stats mode the digest is the output; suppress the per-line render.
-		return "", false
+		return "", false, role
 	}
-	return p.render(entry)
+	out, ok := p.render(entry)
+	return out, ok, role
 }
 
-// keep reports whether an entry passes all configured filters. Level filtering
-// keeps multi-line entries together (continuation lines inherit their parent's
-// level via the tracker); content filters (Include/Exclude) match per line,
-// which is the least surprising behavior for a grep-style filter.
-func (p *Pipeline) keep(entry LogEntry, rawLine string) bool {
-	if entry.Level < p.opts.MinLevel {
-		return false
-	}
-	return p.opts.MatchesContent(entry, rawLine)
+// keep reports whether an entry passes all configured filters. It delegates
+// to a GroupFilter so the --timeline view filters entries exactly the same
+// way rather than reimplementing the join rules.
+func (p *Pipeline) keep(entry LogEntry, rawLine string, role GroupRole) bool {
+	return p.filter.Keep(entry, rawLine, role)
 }
 
 // MatchesContent reports whether an entry passes the content filters — Include
@@ -218,5 +286,15 @@ func (p *Pipeline) Run(ctx context.Context, r io.Reader, w io.Writer) error {
 			return err
 		}
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	// Windowed (--tail) pipelines buffer instead of emitting; release the
+	// window here. Inactive when tail mode is off (nil).
+	for _, out := range p.FlushRetained() {
+		if _, err := fmt.Fprintln(w, out); err != nil {
+			return err
+		}
+	}
+	return nil
 }
