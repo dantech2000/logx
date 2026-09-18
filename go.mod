@@ -1,6 +1,6 @@
 module github.com/dantech2000/logx
 
-go 1.26.3
+go 1.27
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7

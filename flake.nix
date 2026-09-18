@@ -12,7 +12,7 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
-        go = pkgs.go_1_26;
+        go = pkgs.go_1_27;
       in
       {
         devShells.default = pkgs.mkShell {
