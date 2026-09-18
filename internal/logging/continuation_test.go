@@ -65,3 +65,76 @@ func TestLevelTrackerGroupsContinuations(t *testing.T) {
 		t.Fatalf("indented continuation = %v, want inherited WARN", got)
 	}
 }
+
+// classifyStep feeds one line through Classify and asserts the outcome.
+func classifyStep(t *testing.T, tr *LevelTracker, entry LogEntry, raw string, wantLevel LogLevel, wantRole GroupRole) {
+	t.Helper()
+	gotLevel, gotRole := tr.Classify(entry, raw)
+	if gotLevel != wantLevel || gotRole != wantRole {
+		t.Fatalf("Classify(%q) = (%v, %v), want (%v, %v)", raw, gotLevel, gotRole, wantLevel, wantRole)
+	}
+}
+
+// A Python traceback's flush-left header and footer join the error's group so
+// a level filter never shows frames without their head or tail.
+func TestLevelTrackerAbsorbsPythonTraceback(t *testing.T) {
+	var tr LevelTracker
+	plain := func() LogEntry { return LogEntry{Level: DEBUG} }
+	leveled := func(l LogLevel) LogEntry { return LogEntry{Level: l, LevelDetected: true} }
+
+	classifyStep(t, &tr, leveled(ERROR), `{"level":"error","msg":"payment failed"}`, ERROR, GroupAnchor)
+	classifyStep(t, &tr, plain(), "Traceback (most recent call last):", ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), `  File "/app/pay.py", line 42, in charge`, ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), `    gateway.capture(order)`, ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), "PaymentError: insufficient funds", ERROR, GroupContinuation)
+	// A further exception line still belongs to the chain (chained exceptions
+	// read as one entry); only non-boundary prose starts a new entry.
+	classifyStep(t, &tr, plain(), "AnotherError: cascading failure", ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), "while processing the refund queue", DEBUG, GroupAnchor)
+}
+
+// Go panics and Java chained causes absorb the same way.
+func TestLevelTrackerAbsorbsGoAndJavaBoundaries(t *testing.T) {
+	var tr LevelTracker
+	plain := func() LogEntry { return LogEntry{Level: DEBUG} }
+	leveled := func(l LogLevel) LogEntry { return LogEntry{Level: l, LevelDetected: true} }
+
+	classifyStep(t, &tr, leveled(FATAL), "panic: nil map write", FATAL, GroupAnchor)
+	classifyStep(t, &tr, plain(), "goroutine 1 [running]:", FATAL, GroupContinuation)
+	// Go stack frames pair a flush-left function line with an indented file
+	// line; a run of boundary lines all belongs to the trace.
+	classifyStep(t, &tr, plain(), "main.main()", FATAL, GroupContinuation)
+	classifyStep(t, &tr, plain(), "\t/app/main.go:10 +0x14", FATAL, GroupContinuation)
+	classifyStep(t, &tr, plain(), "server.Serve(l)", FATAL, GroupContinuation)
+
+	classifyStep(t, &tr, leveled(ERROR), "ERROR wrapper failed", ERROR, GroupAnchor)
+	classifyStep(t, &tr, plain(), "    at com.example.Wrapper.call(Wrapper.java:10)", ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), "Caused by: java.io.IOException: broken pipe", ERROR, GroupContinuation)
+	classifyStep(t, &tr, plain(), "    at com.example.IO.read(IO.java:5)", ERROR, GroupContinuation)
+}
+
+// Ordinary level-less prose never joins a group, even directly after an error,
+// and neither do blank lines. A boundary line arriving later still absorbs:
+// non-matching lines do not burn the header/footer slots.
+func TestLevelTrackerLeavesProseAlone(t *testing.T) {
+	var tr LevelTracker
+	plain := func() LogEntry { return LogEntry{Level: DEBUG} }
+	leveled := func(l LogLevel) LogEntry { return LogEntry{Level: l, LevelDetected: true} }
+
+	classifyStep(t, &tr, leveled(ERROR), "ERROR upstream unavailable", ERROR, GroupAnchor)
+	classifyStep(t, &tr, plain(), "line without an explicit level", DEBUG, GroupAnchor)
+	classifyStep(t, &tr, plain(), "", DEBUG, GroupAnchor)
+	classifyStep(t, &tr, plain(), "Traceback (most recent call last):", ERROR, GroupContinuation)
+}
+
+// Trace boundaries are recognized under a kubelet timestamp prefix, which the
+// timeline always adds and --timestamps adds on request.
+func TestLevelTrackerAbsorbsPrefixedBoundary(t *testing.T) {
+	var tr LevelTracker
+	leveled := func(l LogLevel) LogEntry { return LogEntry{Level: l, LevelDetected: true} }
+	classifyStep(t, &tr, leveled(ERROR), "2026-05-15T00:38:02Z ERROR boom", ERROR, GroupAnchor)
+	level, role := tr.Classify(LogEntry{Level: DEBUG}, "2026-05-15T00:38:02Z Traceback (most recent call last):")
+	if level != ERROR || role != GroupContinuation {
+		t.Fatalf("prefixed boundary = (%v, %v), want (ERROR, continuation)", level, role)
+	}
+}

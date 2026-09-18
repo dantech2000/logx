@@ -15,7 +15,7 @@ import (
 // as opposed to the client-side content filters.
 func addLogQueryFlags(cmd *cobra.Command) {
 	cmd.Flags().String(flagSince, "", "Only return logs newer than a duration (e.g. 5m, 2h) or an RFC3339 time")
-	cmd.Flags().Int64(flagTail, -1, "Show only the last N lines (-1 for all)")
+	cmd.Flags().Int64(flagTail, -1, "Show only the last N entries; filters apply first and multi-line entries stay whole (windowed client-side, per stream with --all-containers/--selector)")
 	cmd.Flags().Bool(flagTimestamps, false, "Include timestamps on each log line")
 }
 

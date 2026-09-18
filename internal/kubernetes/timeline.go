@@ -164,30 +164,49 @@ func (lf *LogFetcher) collectLogTimelineItems(ctx context.Context) ([]timelineIt
 
 	var items []timelineItem
 	var tracker logging.LevelTracker
+	// The log portion filters exactly like a plain log fetch — level floor,
+	// content filters, and multi-line entries kept as units — through the
+	// shared group filter rather than a local reimplementation.
+	content := logging.NewGroupFilter(lf.FilterLevel, lf.Filters)
+	// A --tail window keeps the last N entries after filtering and grouping,
+	// exactly as in a plain log fetch (podLogOptions no longer bounds
+	// server-side for finite reads).
+	var window *logging.TailBuffer[timelineItem]
+	if lf.TailLines != nil {
+		window = logging.NewTailBuffer[timelineItem](int(*lf.TailLines))
+	}
+	keepItem := func(item timelineItem, role logging.GroupRole) {
+		if window != nil {
+			window.Add(item, role)
+			return
+		}
+		items = append(items, item)
+	}
 	scanner := logging.NewLineReader(podLogs)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		entry := logging.ParseKubernetesLogEntry(rawLine)
 		// Continuation lines inherit the level of the entry they belong to so a
 		// multi-line entry (e.g. a stack trace) is filtered as a unit.
-		entry.Level = tracker.Effective(entry, rawLine)
-		if entry.Level < lf.FilterLevel {
-			continue
-		}
+		level, role := tracker.Classify(entry, rawLine)
+		entry.Level = level
 		// Content filters (--grep/--exclude/--where) apply to the log portion of
-		// the timeline exactly as they do to a plain log fetch. The level floor is
-		// checked against lf.FilterLevel above rather than through the options, so
-		// a caller that sets only FilterLevel keeps working.
-		if !lf.Filters.MatchesContent(entry, rawLine) {
+		// the timeline exactly as they do to a plain log fetch, entries kept as
+		// units. The level floor is checked inside the filter against
+		// lf.FilterLevel, so a caller that sets only FilterLevel keeps working.
+		if !content.Keep(entry, rawLine, role) {
 			continue
 		}
-		items = append(items, timelineItem{
+		keepItem(timelineItem{
 			timestamp: entry.Timestamp,
 			line:      formatTimelineLog(entry),
-		})
+		}, role)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading log stream: %w", err)
+	}
+	if window != nil {
+		items = window.Lines()
 	}
 	return items, nil
 }

@@ -12,8 +12,8 @@ import (
 // addFilterFlags registers the content-filter flags shared by `logs` and
 // `parse`, so both commands filter identically.
 func addFilterFlags(cmd *cobra.Command) {
-	cmd.Flags().StringArrayP(flagGrep, "g", nil, "Show only lines matching this regex (repeatable; OR)")
-	cmd.Flags().StringArray(flagExclude, nil, "Hide lines matching this regex (repeatable)")
+	cmd.Flags().StringArrayP(flagGrep, "g", nil, "Show only entries touching this regex; a match keeps its whole multi-line entry (repeatable; OR)")
+	cmd.Flags().StringArray(flagExclude, nil, "Hide entries touching this regex; an anchor match hides its whole multi-line entry (repeatable)")
 	cmd.Flags().Bool(flagHighlight, true, "Highlight --grep matches in the output")
 	cmd.Flags().StringArrayP(flagWhere, "w", nil, "Keep entries matching a field predicate, e.g. status>=500 (repeatable; AND)")
 	cmd.Flags().StringSliceP(flagFields, "F", nil, "Project output to only these fields, e.g. ts,level,msg")

@@ -22,6 +22,9 @@ It provides features such as:
 - Listing containers within a pod
 - Color-coded output for improved readability
 
+A bare pod name is shorthand for the logs command: logx my-pod -f and
+logx logs my-pod -f do the same thing.
+
 Use "logx [command] --help" for more information about a command.`,
 	Args: cobra.MaximumNArgs(1),
 	// Errors are surfaced once by main via Execute; cobra should not also print

@@ -202,11 +202,26 @@ func (lf *LogFetcher) effectiveMaxConcurrency(streamCount int) int {
 // because the pipeline is stateful (multi-line grouping). When shared is non-nil
 // the pipeline records into it instead of producing per-line output, so --stats
 // aggregates across every stream.
+//
+// A finite --tail window is applied per stream (kubectl parity) after filtering
+// and grouping: the window buffers during the read and releases at the end.
 func (lf *LogFetcher) streamPrefixed(ctx context.Context, s prefixedStream, mu *sync.Mutex, shared *logging.Stats) error {
 	pipeline := lf.newStreamPipeline(shared)
-	return lf.streamLogs(ctx, s.namespace, s.pod, s.container, pipeline, func(line string) error {
+	if tail := lf.clientTail(); tail >= 0 {
+		pipeline.EnableTail(tail)
+	}
+	err := lf.streamLogs(ctx, s.namespace, s.pod, s.container, pipeline, func(line string) error {
 		return writeLine(mu, lf.Writer, s.prefix, line)
 	})
+	// Release a buffered --tail window even when the stream failed: the last
+	// lines read before the failure are still the useful answer. FlushRetained
+	// is nil-safe without tail mode.
+	for _, line := range pipeline.FlushRetained() {
+		if werr := writeLine(mu, lf.Writer, s.prefix, line); werr != nil && err == nil {
+			return werr
+		}
+	}
+	return err
 }
 
 // writeLine writes "prefix + line + newline" as a single guarded write so

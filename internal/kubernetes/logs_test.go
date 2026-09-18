@@ -207,29 +207,28 @@ func TestLogFetcher_GetLogsFiltersByLevel(t *testing.T) {
 					expected: []string{"request accepted", "request failed", "RuntimeException", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
 				},
 				{
-					// Indented continuation frames inherit their parent's level, so
-					// the ERROR stack frames and the WARN continuation stay visible at
-					// INFO; only the flush-left exception-class line (which has no
-					// level and no indentation) is treated as an independent DEBUG
-					// line and hidden.
-					name:     "INFO keeps indented frames, hides flush-left continuation",
+					// Indented continuation frames inherit their parent's level, and
+					// so does the flush-left exception-class line: it opens the
+					// trace, so at INFO the whole entry stays visible as a unit.
+					name:     "INFO keeps the whole stack-trace entry together",
 					level:    logging.INFO,
-					hidden:   []string{"RuntimeException"},
-					expected: []string{"request accepted", "request failed", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
+					hidden:   []string{},
+					expected: []string{"request accepted", "request failed", "RuntimeException", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
 				},
 				{
-					name:     "WARN hides info and the flush-left continuation",
+					name:     "WARN hides info but keeps the error entry whole",
 					level:    logging.WARN,
-					hidden:   []string{"request accepted", "RuntimeException"},
-					expected: []string{"request failed", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
+					hidden:   []string{"request accepted"},
+					expected: []string{"request failed", "RuntimeException", "Client.call", "Handler.handle", "retry scheduled", "retry attempt 2"},
 				},
 				{
-					// The whole ERROR stack trace (the indented frames) is visible at
-					// ERROR, which is the key win of continuation grouping.
-					name:     "ERROR keeps the indented stack frames",
+					// The whole ERROR stack trace — header line, indented frames —
+					// is visible at ERROR, which is the key win of continuation
+					// grouping: no decapitated traces.
+					name:     "ERROR keeps the whole stack-trace entry",
 					level:    logging.ERROR,
-					hidden:   []string{"request accepted", "RuntimeException", "retry scheduled", "retry attempt 2"},
-					expected: []string{"request failed", "Client.call", "Handler.handle"},
+					hidden:   []string{"request accepted", "retry scheduled", "retry attempt 2"},
+					expected: []string{"request failed", "RuntimeException", "Client.call", "Handler.handle"},
 				},
 			},
 		},

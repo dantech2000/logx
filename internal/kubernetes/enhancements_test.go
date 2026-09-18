@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -143,15 +144,19 @@ func TestEffectiveMaxConcurrency(t *testing.T) {
 	}
 }
 
-// TestGetTimelineAppliesSinceAndTail verifies that --since/--tail bound the log
-// portion of the timeline request.
-func TestGetTimelineAppliesSinceAndTail(t *testing.T) {
+// TestGetTimelineGroupsMatchingEntry verifies the timeline's log portion
+// filters entries as units, exactly like a plain log fetch: a --grep matching
+// an error keeps its whole stack trace, not just the matching lines.
+func TestGetTimelineGroupsMatchingEntry(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	var gotOptions *corev1.PodLogOptions
+	logBody := "2026-05-15T00:38:02Z INFO application started\n" +
+		"2026-05-15T00:38:04Z ERROR request failed\n" +
+		"Traceback (most recent call last):\n" +
+		"  at handler.go:9\n" +
+		"ValueError: bad input\n" +
+		"2026-05-15T00:38:06Z INFO application stopped\n"
 	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
-		ga := action.(clientgotesting.GenericAction)
-		gotOptions = ga.GetValue().(*corev1.PodLogOptions)
-		return true, &runtime.Unknown{Raw: []byte("2026-05-15T00:38:04Z INFO hello")}, nil
+		return true, &runtime.Unknown{Raw: []byte(logBody)}, nil
 	})
 
 	pod := &corev1.Pod{
@@ -166,7 +171,55 @@ func TestGetTimelineAppliesSinceAndTail(t *testing.T) {
 	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
 	fetcher.ContainerName = "app"
 	fetcher.FilterLevel = logging.DEBUG
-	tail := int64(40)
+	fetcher.Filters = logging.PipelineOptions{Include: []*regexp.Regexp{regexp.MustCompile("request failed")}}
+
+	if err := fetcher.GetTimeline(context.Background()); err != nil {
+		t.Fatalf("GetTimeline error: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"request failed", "Traceback", "handler.go", "ValueError"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("timeline grep output missing %q:\n%s", want, out)
+		}
+	}
+	for _, dropped := range []string{"application started", "application stopped"} {
+		if strings.Contains(out, dropped) {
+			t.Errorf("timeline grep output should not contain %q:\n%s", dropped, out)
+		}
+	}
+}
+
+// TestGetTimelineAppliesSinceAndTail verifies that --since bounds the log
+// portion of the timeline request server-side while --tail windows the last N
+// entries client-side after filtering and grouping (a server-side tail would
+// slice raw lines before the pipeline ever saw them).
+func TestGetTimelineAppliesSinceAndTail(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	var gotOptions *corev1.PodLogOptions
+	logBody := "2026-05-15T00:38:01Z INFO first\n" +
+		"2026-05-15T00:38:02Z INFO second\n" +
+		"2026-05-15T00:38:03Z INFO third\n" +
+		"2026-05-15T00:38:04Z INFO fourth\n" +
+		"2026-05-15T00:38:05Z INFO fifth\n"
+	clientset.PrependReactor("get", "pods/log", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		ga := action.(clientgotesting.GenericAction)
+		gotOptions = ga.GetValue().(*corev1.PodLogOptions)
+		return true, &runtime.Unknown{Raw: []byte(logBody)}, nil
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+	}
+	if _, err := clientset.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	var buf bytes.Buffer
+	fetcher := NewLogFetcher(clientset, "default", "p", false, false, &buf)
+	fetcher.ContainerName = "app"
+	fetcher.FilterLevel = logging.DEBUG
+	tail := int64(2)
 	fetcher.TailLines = &tail
 	since := int64(900)
 	fetcher.SinceSeconds = &since
@@ -177,13 +230,24 @@ func TestGetTimelineAppliesSinceAndTail(t *testing.T) {
 	if gotOptions == nil {
 		t.Fatal("timeline did not request pod logs")
 	}
-	if gotOptions.TailLines == nil || *gotOptions.TailLines != 40 {
-		t.Fatalf("timeline TailLines = %v, want 40", gotOptions.TailLines)
+	if gotOptions.TailLines != nil {
+		t.Fatalf("timeline TailLines = %v, want nil (finite reads window client-side)", *gotOptions.TailLines)
 	}
 	if gotOptions.SinceSeconds == nil || *gotOptions.SinceSeconds != 900 {
 		t.Fatalf("timeline SinceSeconds = %v, want 900", gotOptions.SinceSeconds)
 	}
 	if !gotOptions.Timestamps {
 		t.Fatal("timeline must keep Timestamps on for sorting")
+	}
+	out := buf.String()
+	for _, want := range []string{"fourth", "fifth"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("timeline tail output missing %q:\n%s", want, out)
+		}
+	}
+	for _, dropped := range []string{"first", "second", "third"} {
+		if strings.Contains(out, dropped) {
+			t.Errorf("timeline tail output should not contain %q:\n%s", dropped, out)
+		}
 	}
 }
